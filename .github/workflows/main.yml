@@ -5,7 +5,6 @@ on:
   schedule:
     - cron: '*/15 * * * *'
 
-# เพิ่มส่วนนี้เข้ามาเพื่อให้สิทธิ์ในการเขียนไฟล์
 permissions:
   contents: write
 
@@ -34,10 +33,11 @@ jobs:
 
       - name: Commit and push if changed
         run: |
-          # ตรวจสอบก่อนว่าไฟล์ last_data.txt ถูกสร้างขึ้นมาหรือไม่
           if [ -f last_data.txt ]; then
             git config --local user.email "action@github.com"
             git config --local user.name "GitHub Action"
+            # เพิ่มคำสั่ง git pull เข้ามาเพื่อให้ข้อมูลเป็นปัจจุบันก่อน push
+            git pull
             git add last_data.txt
             git diff --quiet && git diff --staged --quiet || (git commit -m "Update last water data" && git push)
           else

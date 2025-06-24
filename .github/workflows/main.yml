@@ -39,3 +39,4 @@ jobs:
     else
       echo "last_data.txt not found, skipping commit."
     fi
+    

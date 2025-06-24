@@ -5,6 +5,10 @@ on:
   schedule:
     - cron: '*/15 * * * *'
 
+# เพิ่มส่วนนี้เข้ามาเพื่อให้สิทธิ์ในการเขียนไฟล์
+permissions:
+  contents: write
+
 jobs:
   scrape:
     runs-on: ubuntu-latest

@@ -75,7 +75,7 @@ def main():
                       f"⬅️ *ค่าเดิม*\n`{last_data if last_data else 'N/A'}`\n" \
                       f"━━━━━━━━━━━━━━\n" \
                       f"🗓️ {formatted_datetime}\n\n" \
-                      f"_Power by {sponsor_name}_"
+                      f"_สนับสนุนข้อความโดยร้านจิปาถะตลาดอินทร์บุรี_"
 
             send_line_message(message)
             with open(last_data_file, 'w', encoding='utf-8') as f:

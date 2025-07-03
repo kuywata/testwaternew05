@@ -1,10 +1,10 @@
 import requests
 import re
 import json
-from bs4 import BeautifulSoup
 import os
 from datetime import datetime
 import pytz
+import time # 👈 เพิ่มบรรทัดนี้
 
 # นี่คือ URL ที่ถูกต้อง ต้องเป็นข้อความธรรมดาแบบนี้
 URL = 'https://tiwrm.hii.or.th/DATA/REPORT/php/chart/chaopraya/small/chaopraya.php'
@@ -14,7 +14,13 @@ LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
 
 def get_water_data():
     try:
-        response = requests.get(URL, timeout=15)
+        # --- 👇 เริ่มการเปลี่ยนแปลงตรงนี้ ---
+        timestamp = int(time.time())
+        url_with_cache_bust = f"{URL}?_={timestamp}"
+        print(f"Fetching data from: {url_with_cache_bust}") # เพิ่ม log เพื่อตรวจสอบ
+        response = requests.get(url_with_cache_bust, timeout=15)
+        # --- 👆 สิ้นสุดการเปลี่ยนแปลง ---
+        
         response.raise_for_status()
         match = re.search(r'var json_data = (\[.*\]);', response.text)
         if not match:
@@ -29,10 +35,10 @@ def get_water_data():
             return f"{storage}/ {qmax} cms"
         return None
     except (requests.exceptions.RequestException, json.JSONDecodeError, AttributeError) as e:
-        # แก้ไขการแสดงผล error ให้ชัดเจนขึ้น
         print(f"An error occurred in get_water_data: {e}")
         return None
 
+# ส่วนที่เหลือของไฟล์ไม่ต้องแก้ไข
 def send_line_message(message):
     if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_TARGET_ID:
         print("LINE credentials are not set. Cannot send message.")

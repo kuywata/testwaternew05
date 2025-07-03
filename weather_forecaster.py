@@ -73,7 +73,7 @@ def main():
             tz_thailand = pytz.timezone('Asia/Bangkok')
             now_thailand = datetime.now(tz_thailand)
             formatted_datetime = now_thailand.strftime("%d/%m/%Y %H:%M:%S")
-            full_message = f"{current_rain_forecast}\nอัปเดต: {formatted_datetime}"
+            full_message = f"{current_rain_forecast}\nอัปเดต: {formatted_datetime}\n\nพื้นที่ผู้สนับสนุน"
             send_line_message(full_message)
         write_data('last_rain_forecast.txt', current_rain_forecast)
     else:

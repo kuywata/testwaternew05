@@ -3,7 +3,8 @@ name: Water Level Scraper
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/15 * * * *'
+    # เปลี่ยนจาก */15 เป็น */5 เพื่อรันทุก 5 นาที
+    - cron: '*/5 * * * *'
 
 permissions:
   contents: write
@@ -36,7 +37,6 @@ jobs:
           if [ -f last_data.txt ]; then
             git config --local user.email "action@github.com"
             git config --local user.name "GitHub Action"
-            # เพิ่มคำสั่ง git pull เข้ามาเพื่อให้ข้อมูลเป็นปัจจุบันก่อน push
             git pull
             git add last_data.txt
             git diff --quiet && git diff --staged --quiet || (git commit -m "Update last water data" && git push)

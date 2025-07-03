@@ -21,7 +21,7 @@ def get_weather_forecast():
         response = requests.get(url, timeout=15)
         response.raise_for_status()
         forecast_data = response.json()
-        for forecast in forecast_data.get('list', [])[:8]:
+        for forecast in forecast_data.get('list', [])[:2]:
             weather = forecast.get('weather', [{}])[0]
             if str(weather.get('id', '')).startswith('5'):
                 tz_thailand = pytz.timezone('Asia/Bangkok')

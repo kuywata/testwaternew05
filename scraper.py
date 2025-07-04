@@ -2,46 +2,74 @@ import requests
 import re
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
-import time # 👈 เพิ่มบรรทัดนี้
+import time
 
-# นี่คือ URL ที่ถูกต้อง ต้องเป็นข้อความธรรมดาแบบนี้
+# --- ค่าคงที่และ URL ---
 URL = 'https://tiwrm.hii.or.th/DATA/REPORT/php/chart/chaopraya/small/chaopraya.php'
-
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
+TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
+HISTORICAL_LOG_FILE = 'historical_log.csv'
 
+# --- ฟังก์ชันดึงข้อมูล ---
 def get_water_data():
+    """ดึงข้อมูลระดับน้ำล่าสุด"""
     try:
-        # --- 👇 เริ่มการเปลี่ยนแปลงตรงนี้ ---
         timestamp = int(time.time())
         url_with_cache_bust = f"{URL}?_={timestamp}"
-        print(f"Fetching data from: {url_with_cache_bust}") # เพิ่ม log เพื่อตรวจสอบ
         response = requests.get(url_with_cache_bust, timeout=15)
-        # --- 👆 สิ้นสุดการเปลี่ยนแปลง ---
-        
         response.raise_for_status()
         match = re.search(r'var json_data = (\[.*\]);', response.text)
-        if not match:
-            print("Could not find json_data variable in the page.")
-            return None
-        json_str = match.group(1)
-        data = json.loads(json_str)
+        if not match: return None
+        data = json.loads(match.group(1))
         station_data = data[0].get('itc_water', {}).get('C13', None)
         if station_data:
-            storage = station_data.get('storage', '-')
-            qmax = station_data.get('qmax', '-')
-            return f"{storage}/ {qmax} cms"
+            return f"{station_data.get('storage', '-')}/ {station_data.get('qmax', '-')} cms"
         return None
-    except (requests.exceptions.RequestException, json.JSONDecodeError, AttributeError) as e:
-        print(f"An error occurred in get_water_data: {e}")
+    except Exception as e:
+        print(f"Error in get_water_data: {e}")
         return None
 
-# ส่วนที่เหลือของไฟล์ไม่ต้องแก้ไข
+# --- ฟังก์ชันสำหรับข้อมูลย้อนหลัง ---
+def get_historical_data(target_date):
+    """ค้นหาข้อมูลที่ใกล้เคียงกับวันเวลาของปีที่แล้วจากไฟล์ log"""
+    if not os.path.exists(HISTORICAL_LOG_FILE):
+        return None
+    
+    start_range = target_date - timedelta(hours=12)
+    end_range = target_date + timedelta(hours=12)
+    
+    closest_entry = None
+    smallest_diff = timedelta.max
+
+    with open(HISTORICAL_LOG_FILE, 'r', encoding='utf-8') as f:
+        for line in f:
+            try:
+                timestamp_str, value = line.strip().split(',', 1)
+                log_date = datetime.fromisoformat(timestamp_str)
+                
+                if start_range <= log_date <= end_range:
+                    diff = abs(target_date - log_date)
+                    if diff < smallest_diff:
+                        smallest_diff = diff
+                        closest_entry = value
+            except ValueError:
+                continue
+                
+    return closest_entry
+
+def append_to_historical_log(now, data):
+    """บันทึกข้อมูลปัจจุบันลงในไฟล์ log"""
+    with open(HISTORICAL_LOG_FILE, 'a', encoding='utf-8') as f:
+        f.write(f"{now.isoformat()},{data}\n")
+
+# --- ฟังก์ชันส่ง LINE ---
 def send_line_message(message):
+    """ส่งข้อความไปยัง LINE"""
     if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_TARGET_ID:
-        print("LINE credentials are not set. Cannot send message.")
+        print("LINE credentials not set.")
         return
     url = 'https://api.line.me/v2/bot/message/push'
     headers = { 'Content-Type': 'application/json', 'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}' }
@@ -50,9 +78,10 @@ def send_line_message(message):
         response = requests.post(url, headers=headers, json=payload, timeout=10)
         response.raise_for_status()
         print("LINE message sent successfully!")
-    except requests.exceptions.RequestException as e:
-        print(f"Error sending LINE message: {e.response.text if e.response else 'No response'}")
+    except Exception as e:
+        print(f"Error sending LINE message: {e}")
 
+# --- การทำงานหลัก ---
 def main():
     last_data_file = 'last_data.txt'
     last_data = ''
@@ -62,34 +91,43 @@ def main():
             
     current_data = get_water_data()
     
-    if current_data:
-        print(f"Current data: {current_data}")
-        print(f"Last saved data: {last_data}")
-        if current_data != last_data:
-            print("Data has changed! Sending notification...")
-            
-            tz_thailand = pytz.timezone('Asia/Bangkok')
-            now_thailand = datetime.now(tz_thailand)
-            formatted_datetime = now_thailand.strftime("%d/%m/%Y %H:%M:%S")
-
-            sponsor_name = "airtest01" 
-
-            message = f"🌊 *แจ้งเตือนระดับน้ำเปลี่ยนแปลง!*\n" \
-                      f"━━━━━━━━━━━━━━\n" \
-                      f"*เขื่อนเจ้าพระยา, ชัยนาท*\n\n" \
-                      f"✅ *ค่าปัจจุบัน*\n`{current_data}`\n\n" \
-                      f"⬅️ *ค่าเดิม*\n`{last_data if last_data else 'N/A'}`\n" \
-                      f"━━━━━━━━━━━━━━\n" \
-                      f"🗓️ {formatted_datetime}\n\n" \
-                      f"พื้นที่ผู้สนับสนุน"
-
-            send_line_message(message)
-            with open(last_data_file, 'w', encoding='utf-8') as f:
-                f.write(current_data)
+    if current_data and current_data != last_data:
+        print("Data has changed! Processing notification...")
+        
+        now_thailand = datetime.now(TIMEZONE_THAILAND)
+        
+        last_year_date = now_thailand - timedelta(days=365)
+        historical_data = get_historical_data(last_year_date)
+        
+        historical_text = ""
+        if historical_data:
+            last_year_date_str = last_year_date.strftime("%d/%m/%Y")
+            historical_text = f"\n\nเทียบกับปีที่แล้ว ({last_year_date_str})\nค่าน้ำอยู่ที่: `{historical_data}`"
         else:
-            print("Data has not changed.")
+            print("Historical data not found for last year.")
+        
+        formatted_datetime = now_thailand.strftime("%d/%m/%Y %H:%M:%S")
+        message = (f"🌊 *แจ้งเตือนระดับน้ำเปลี่ยนแปลง!*\n"
+                   f"━━━━━━━━━━━━━━\n"
+                   f"*เขื่อนเจ้าพระยา, ชัยนาท*\n\n"
+                   f"✅ *ค่าปัจจุบัน*\n`{current_data}`\n\n"
+                   f"⬅️ *ค่าเดิม*\n`{last_data if last_data else 'N/A'}`\n"
+                   f"━━━━━━━━━━━━━━\n"
+                   f"🗓️ {formatted_datetime}"
+                   f"{historical_text}")
+
+        send_line_message(message)
+        
+        with open(last_data_file, 'w', encoding='utf-8') as f:
+            f.write(current_data)
+        
+        append_to_historical_log(now_thailand, current_data)
+        print("Appended new data to historical log.")
+        
+    elif not current_data:
+        print("Could not retrieve current data.")
     else:
-        print("Could not retrieve current data from JSON.")
+        print("Data has not changed.")
 
 if __name__ == "__main__":
     main()

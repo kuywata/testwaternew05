@@ -3,7 +3,7 @@ name: Water Level Scraper
 on:
   workflow_dispatch:
   schedule:
-    # เปลี่ยนจาก */15 เป็น */5 เพื่อรันทุก 5 นาที
+    # ตรวจสอบทุก 5 นาที (ยังคงเหมือนเดิม)
     - cron: '*/5 * * * *'
 
 permissions:
@@ -34,12 +34,14 @@ jobs:
 
       - name: Commit and push if changed
         run: |
-          if [ -f last_data.txt ]; then
-            git config --local user.email "action@github.com"
-            git config --local user.name "GitHub Action"
-            git pull
-            git add last_data.txt
-            git diff --quiet && git diff --staged --quiet || (git commit -m "Update last water data" && git push)
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git pull
+          # เพิ่ม historical_log.csv เข้าไปใน git ด้วย
+          git add last_data.txt historical_log.csv
+          if ! git diff --staged --quiet; then
+            git commit -m "Update water data and historical log"
+            git push
           else
-            echo "last_data.txt not found, skipping commit."
+            echo "No changes to commit."
           fi

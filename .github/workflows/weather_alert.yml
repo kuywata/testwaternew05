@@ -33,7 +33,7 @@ jobs:
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
         run: python weather_forecaster.py
 
-- name: Commit and push if changed
+      - name: Commit and push if changed
         run: |
           # แก้ไขให้เช็คไฟล์ที่ถูกต้อง คือ last_forecast_id.txt
           if [ -f last_forecast_id.txt ]; then

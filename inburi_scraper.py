@@ -10,7 +10,7 @@ LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
 TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 
 # --- การตั้งค่าสำหรับสคริปต์นี้โดยเฉพาะ ---
-STATION_URL = "https://water.rid.go.th/tele/waterlevel/w-chaophaya"
+STATION_URL = "http://water.rid.go.th/tele_waterlevel/chaophaya/"
 STATION_NAME = "C.35"  # รหัสสถานี อ.อินทร์บุรี
 LAST_DATA_FILE = 'last_inburi_data.txt' # ไฟล์เก็บข้อมูลล่าสุดของอินทร์บุรี
 

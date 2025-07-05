@@ -3,7 +3,12 @@ name: Check In Buri River Level
 on:
   workflow_dispatch:
   schedule:
-    - cron: '15 * * * *' # ทำงานทุกชั่วโมง นาทีที่ 15 (เพื่อเลี่ยงการชนกับสคริปต์เดิม)
+    - cron: '15 * * * *' # ทำงานทุกชั่วโมง นาทีที่ 15
+
+# --- ส่วนที่ต้องเพิ่มเข้ามา ---
+permissions:
+  contents: write
+# --- จบส่วนที่ต้องเพิ่ม ---
 
 jobs:
   scrape:
@@ -22,10 +27,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # --- ส่วนนี้คือส่วนที่ต้องเพิ่มเข้ามา ---
       - name: Run In Buri scraper script
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
         run: python inburi_scraper.py
+
+      # --- ส่วนที่ต้องเพิ่มเข้ามา (เหมือนกับของระบบแจ้งเตือนฝน) ---
+      - name: Commit and push if changed
+        run: |
+          if [ -f last_inburi_data.txt ]; then
+            git config --local user.email "action@github.com"
+            git config --local user.name "GitHub Action"
+            git pull
+            git add last_inburi_data.txt
+            git diff --quiet && git diff --staged --quiet || (git commit -m "Update In Buri river data" && git push)
+          else
+            echo "last_inburi_data.txt not found, skipping commit."
+          fi
       # --- จบส่วนที่ต้องเพิ่ม ---

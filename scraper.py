@@ -32,7 +32,7 @@ def get_water_data():
         print(f"Error in get_water_data: {e}")
         return None
 
-# --- ฟังก์ชันสำหรับข้อมูลย้อนหลัง ---
+# --- ฟังก์ชันสำหรับข้อมูลย้อนหลัง (ฉบับแก้ไข) ---
 def get_historical_data(target_date):
     """ค้นหาข้อมูลที่ใกล้เคียงกับวันเวลาของปีที่แล้วจากไฟล์ log"""
     if not os.path.exists(HISTORICAL_LOG_FILE):
@@ -50,6 +50,15 @@ def get_historical_data(target_date):
                 timestamp_str, value = line.strip().split(',', 1)
                 log_date = datetime.fromisoformat(timestamp_str)
                 
+                # --- ส่วนที่แก้ไข ---
+                # ตรวจสอบว่า log_date ที่อ่านมามี timezone หรือไม่
+                # .tzinfo is None คือไม่มี timezone (naive)
+                if log_date.tzinfo is None:
+                    # ถ้าไม่มี ให้กำหนด timezone ของไทยให้มัน
+                    log_date = TIMEZONE_THAILAND.localize(log_date)
+                # --- จบส่วนแก้ไข ---
+                
+                # ตอนนี้ log_date เป็น aware และสามารถเปรียบเทียบได้แล้ว
                 if start_range <= log_date <= end_range:
                     diff = abs(target_date - log_date)
                     if diff < smallest_diff:

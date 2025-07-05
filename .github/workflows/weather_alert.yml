@@ -33,14 +33,18 @@ jobs:
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
         run: python weather_forecaster.py
 
-      - name: Commit and push if changed
+     - name: Commit and push if changed
         run: |
-          if [ -f last_rain_forecast.txt ]; then
+          # แก้ไขให้เช็คไฟล์ที่ถูกต้อง คือ last_forecast_id.txt
+          if [ -f last_forecast_id.txt ]; then
             git config --local user.email "action@github.com"
             git config --local user.name "GitHub Action"
             git pull
-            git add last_rain_forecast.txt
-            git diff --quiet && git diff --staged --quiet || (git commit -m "Update last rain forecast" && git push)
+            # แก้ไขให้เพิ่มไฟล์ที่ถูกต้อง คือ last_forecast_id.txt
+            git add last_forecast_id.txt
+            # แก้ไขข้อความ commit ให้สื่อความหมายมากขึ้น
+            git diff --quiet && git diff --staged --quiet || (git commit -m "Update last forecast status" && git push)
           else
-            echo "last_rain_forecast.txt not found, skipping commit."
+            # แก้ไขข้อความใน log ให้ตรงกัน
+            echo "last_forecast_id.txt not found, skipping commit."
           fi

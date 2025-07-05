@@ -1,5 +1,5 @@
 import requests
-import json
+from bs4 import BeautifulSoup
 import os
 from datetime import datetime
 import pytz
@@ -10,37 +10,35 @@ LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
 TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 
 # --- การตั้งค่าสำหรับสคริปต์นี้โดยเฉพาะ ---
-STATION_API_URL = "https://www.thaiwater.net/water/api/stations/tele_wl/C35"
+# เปลี่ยนไปใช้ URL หน้าเว็บปกติของ Thaiwater ซึ่งข้อมูลแน่นอนกว่า
+STATION_URL = "https://www.thaiwater.net/water/station/dataindex/tele_wl/C35"
 LAST_DATA_FILE = 'last_inburi_data.txt'
 
 def get_inburi_river_data():
-    """ดึงข้อมูลระดับน้ำและระดับตลิ่งจาก API ของ ThaiWater.net สำหรับสถานี C.35"""
+    """ดึงข้อมูลระดับน้ำและระดับตลิ่งจากหน้าเว็บของ ThaiWater.net สำหรับสถานี C.35"""
     try:
-        print(f"Fetching data from ThaiWater API for station C35...")
-        response = requests.get(STATION_API_URL, timeout=15)
+        print(f"Fetching data from ThaiWater page for station C35...")
+        response = requests.get(STATION_URL, timeout=15)
         response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
 
-        try:
-            api_data = response.json()
-        except json.JSONDecodeError:
-            print("Error: Failed to decode JSON. The response from the server is not valid JSON.")
-            print("--- Server Response Text (First 500 chars) ---")
-            print(response.text[:500])
-            print("---------------------------------------------")
-            return None
-
-        latest_data = api_data['data']['data'][-1]
-        station_name_full = api_data['data']['station']['tele_station_name']
-        water_level_str = latest_data['storage_water_level']
-        bank_level_str = api_data['data']['station']['ground_level']
+        # ค้นหาข้อมูลจากโครงสร้างหน้าเว็บโดยตรง
+        station_name_full = soup.find('h4').text.strip()
+        
+        # ค้นหา div ที่เก็บข้อมูลระดับน้ำและระดับตลิ่ง
+        # ระดับน้ำ
+        water_level_div = soup.find('div', string="ระดับน้ำ")
+        water_level_val_div = water_level_div.find_next_sibling('div')
+        water_level_str = water_level_val_div.find('h3').text.strip()
+        
+        # ระดับตลิ่ง
+        bank_level_div = soup.find('div', string="ระดับตลิ่ง")
+        bank_level_val_div = bank_level_div.find_next_sibling('div')
+        bank_level_str = bank_level_val_div.find('h3').text.strip()
 
         print(f"Found station: {station_name_full}")
         print(f"  - Water Level: {water_level_str}")
         print(f"  - Bank Level: {bank_level_str}")
-
-        if water_level_str is None or bank_level_str is None:
-            print("Warning: Water level or bank level data is null.")
-            return None
 
         water_level = float(water_level_str)
         bank_level = float(bank_level_str)
@@ -53,11 +51,8 @@ def get_inburi_river_data():
             "overflow": overflow
         }
 
-    except requests.exceptions.RequestException as e:
-        print(f"An error occurred during the request: {e}")
-        return None
-    except (ValueError, IndexError, KeyError) as e:
-        print(f"An error occurred while parsing the data: {e}")
+    except (requests.exceptions.RequestException, AttributeError, ValueError, IndexError) as e:
+        print(f"An error occurred in get_inburi_river_data: {e}")
         return None
 
 def send_line_message(data):
@@ -128,6 +123,5 @@ def main():
     else:
         print("Data has not changed. No action needed.")
 
-# --- ส่วน "ปุ่มสตาร์ท" ที่สำคัญ ---
 if __name__ == "__main__":
     main()

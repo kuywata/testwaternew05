@@ -1,7 +1,7 @@
 import requests
-from bs4 import BeautifulSoup
+import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 
 # --- การตั้งค่าทั่วไป ---
@@ -10,54 +10,49 @@ LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
 TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 
 # --- การตั้งค่าสำหรับสคริปต์นี้โดยเฉพาะ ---
-STATION_URL = "http://water.rid.go.th/tele_waterlevel/chaophaya/"
-STATION_NAME = "C.35"  # รหัสสถานี อ.อินทร์บุรี
-LAST_DATA_FILE = 'last_inburi_data.txt' # ไฟล์เก็บข้อมูลล่าสุดของอินทร์บุรี
+# เปลี่ยนไปใช้ API ของ ThaiWater.net ซึ่งเสถียรกว่า
+STATION_API_URL = "https://www.thaiwater.net/water/api/stations/tele_wl/C35"
+LAST_DATA_FILE = 'last_inburi_data.txt'
 
 def get_inburi_river_data():
-    """ดึงข้อมูลระดับน้ำ, ระดับตลิ่ง และคำนวณส่วนต่างจากสถานี C.35 อินทร์บุรี"""
+    """ดึงข้อมูลระดับน้ำและระดับตลิ่งจาก API ของ ThaiWater.net สำหรับสถานี C.35"""
     try:
-        print(f"Fetching data from RID website for station {STATION_NAME}...")
-        # เพิ่ม verify=False เพื่อข้ามการตรวจสอบ SSL Certificate
-        response = requests.get(STATION_URL, timeout=15, verify=False)
+        print(f"Fetching data from ThaiWater API for station C35...")
+        # เรากำลังดึงข้อมูลจาก API ซึ่งเป็น JSON โดยตรง ไม่ใช่หน้าเว็บ
+        response = requests.get(STATION_API_URL, timeout=15)
         response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # แปลงข้อมูล JSON ที่ได้มาเป็น Dictionary
+        api_data = response.json()
+        
+        # ดึงข้อมูลล่าสุดจากลิสต์ข้อมูลที่ API ส่งมา
+        latest_data = api_data['data']['data'][-1]
+        
+        station_name_full = api_data['data']['station']['tele_station_name']
+        water_level_str = latest_data['storage_water_level']
+        # ระดับตลิ่งจะอยู่ในข้อมูลสถานี
+        bank_level_str = api_data['data']['station']['ground_level']
 
-        # ค้นหาตารางข้อมูลทั้งหมด
-        tables = soup.find_all('table', class_='table-striped')
-        for table in tables:
-            rows = table.find_all('tr')
-            for row in rows:
-                cells = row.find_all('td')
-                # เช็คว่าแถวนี้คือสถานี C.35 หรือไม่
-                if cells and STATION_NAME in cells[0].text:
-                    station_name_full = cells[0].text.strip()
-                    water_level_str = cells[1].text.strip()
-                    bank_level_str = cells[3].text.strip() # ระดับตลิ่งคือคอลัมน์ที่ 4
+        print(f"Found station: {station_name_full}")
+        print(f"  - Water Level: {water_level_str}")
+        print(f"  - Bank Level: {bank_level_str}")
 
-                    print(f"Found station: {station_name_full}")
-                    print(f"  - Water Level: {water_level_str}")
-                    print(f"  - Bank Level: {bank_level_str}")
+        # แปลงเป็นตัวเลข
+        water_level = float(water_level_str)
+        bank_level = float(bank_level_str)
 
-                    # แปลงเป็นตัวเลข
-                    water_level = float(water_level_str)
-                    bank_level = float(bank_level_str)
+        # คำนวณส่วนต่างจากตลิ่ง
+        overflow = water_level - bank_level
 
-                    # คำนวณส่วนต่างจากตลิ่ง
-                    overflow = water_level - bank_level
+        # สร้าง Dictionary เพื่อส่งข้อมูลกลับ
+        return {
+            "station": station_name_full,
+            "water_level": water_level,
+            "bank_level": bank_level,
+            "overflow": overflow
+        }
 
-                    # สร้าง Dictionary เพื่อส่งข้อมูลกลับ
-                    return {
-                        "station": station_name_full,
-                        "water_level": water_level,
-                        "bank_level": bank_level,
-                        "overflow": overflow
-                    }
-
-        print(f"Could not find station {STATION_NAME} in the tables.")
-        return None
-
-    except (requests.exceptions.RequestException, ValueError, IndexError) as e:
+    except (requests.exceptions.RequestException, ValueError, IndexError, KeyError) as e:
         print(f"An error occurred in get_inburi_river_data: {e}")
         return None
 
@@ -112,7 +107,7 @@ def write_data(file_path, data):
 def main():
     """ตรรกะหลักของโปรแกรม"""
     current_data_dict = get_inburi_river_data()
-
+    
     if current_data_dict is None:
         print("Could not retrieve current data. Exiting.")
         return
@@ -131,6 +126,5 @@ def main():
     else:
         print("Data has not changed. No action needed.")
 
-# --- ส่วน "ปุ่มสตาร์ท" ที่สำคัญ ---
 if __name__ == "__main__":
     main()

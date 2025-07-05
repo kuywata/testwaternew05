@@ -53,7 +53,7 @@ def get_weather_forecast():
                 forecast_time_th = forecast_time_utc.astimezone(tz_thailand)
                 
                 # --- รูปแบบข้อความดั้งเดิม ---
-                message = (f"🌧️ *พยากรณ์ฝนตก (ความมั่นใจ > {RAIN_CONFIDENCE_THRESHOLD*100:.0f}%)*\n"
+               message = (f"🌧️ *พยากรณ์ฝนตก (ความมั่นใจ {pop*100:.0f}%)*\n" #...
                            f"━━━━━━━━━━━━━━\n"
                            f"*พื้นที่: อ.อินทร์บุรี, สิงห์บุรี*\n\n"
                            f"▶️ *คาดการณ์:* {weather.get('description', 'N/A')}\n"

@@ -3,12 +3,10 @@ name: Check In Buri River Level
 on:
   workflow_dispatch:
   schedule:
-    - cron: '15 * * * *' # ทำงานทุกชั่วโมง นาทีที่ 15
+    - cron: '15 * * * *'
 
-# --- ส่วนที่ต้องเพิ่มเข้ามา ---
 permissions:
   contents: write
-# --- จบส่วนที่ต้องเพิ่ม ---
 
 jobs:
   scrape:
@@ -22,6 +20,13 @@ jobs:
         with:
           python-version: '3.10'
 
+      # --- ส่วนที่เพิ่มเข้ามาสำหรับ Selenium ---
+      - name: Install Google Chrome
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+      # --- จบส่วนที่เพิ่ม ---
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -33,7 +38,6 @@ jobs:
           LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
         run: python inburi_scraper.py
 
-      # --- ส่วนที่ต้องเพิ่มเข้ามา (เหมือนกับของระบบแจ้งเตือนฝน) ---
       - name: Commit and push if changed
         run: |
           if [ -f last_inburi_data.txt ]; then
@@ -45,4 +49,3 @@ jobs:
           else
             echo "last_inburi_data.txt not found, skipping commit."
           fi
-      # --- จบส่วนที่ต้องเพิ่ม ---

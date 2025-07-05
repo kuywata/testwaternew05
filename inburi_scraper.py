@@ -10,42 +10,56 @@ LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
 TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 
 # --- การตั้งค่าสำหรับสคริปต์นี้โดยเฉพาะ ---
-# เปลี่ยนไปใช้ URL หน้าเว็บปกติของ Thaiwater ซึ่งข้อมูลแน่นอนกว่า
-STATION_URL = "https://www.thaiwater.net/water/station/dataindex/tele_wl/C35"
+STATION_URL = "https://singburi.thaiwater.net/wl" # <-- เปลี่ยนเป็น URL ใหม่ที่คุณให้มา
 LAST_DATA_FILE = 'last_inburi_data.txt'
+STATION_ID_TO_FIND = "C.35" # <-- ID ของสถานีที่ต้องการค้นหา (อ.อินทร์บุรี)
 
 def get_inburi_river_data():
-    """ดึงข้อมูลระดับน้ำและระดับตลิ่งจากหน้าเว็บของ ThaiWater.net สำหรับสถานี C.35"""
+    """ดึงข้อมูลระดับน้ำจากตารางในหน้าเว็บ singburi.thaiwater.net"""
     try:
-        print(f"Fetching data from ThaiWater page for station C35...")
-        response = requests.get(STATION_URL, timeout=15)
+        print(f"Fetching data from {STATION_URL} for station {STATION_ID_TO_FIND}...")
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(STATION_URL, headers=headers, timeout=20)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
 
-        # ค้นหาข้อมูลจากโครงสร้างหน้าเว็บโดยตรง
-        station_name_full = soup.find('h4').text.strip()
-        
-        # ค้นหา div ที่เก็บข้อมูลระดับน้ำและระดับตลิ่ง
-        # ระดับน้ำ
-        water_level_div = soup.find('div', string="ระดับน้ำ")
-        water_level_val_div = water_level_div.find_next_sibling('div')
-        water_level_str = water_level_val_div.find('h3').text.strip()
-        
-        # ระดับตลิ่ง
-        bank_level_div = soup.find('div', string="ระดับตลิ่ง")
-        bank_level_val_div = bank_level_div.find_next_sibling('div')
-        bank_level_str = bank_level_val_div.find('h3').text.strip()
+        # ค้นหาตารางข้อมูลจาก id 'tele_wl'
+        table = soup.find('table', id='tele_wl')
+        if not table:
+            print("Could not find the data table on the page.")
+            return None
 
-        print(f"Found station: {station_name_full}")
-        print(f"  - Water Level: {water_level_str}")
-        print(f"  - Bank Level: {bank_level_str}")
+        # วนลูปหาแถว (tr) ที่มีข้อมูลสถานี C.35
+        target_row = None
+        for row in table.find('tbody').find_all('tr'):
+            columns = row.find_all('td')
+            # คอลัมน์แรก (index 0) คือชื่อสถานี
+            if columns and STATION_ID_TO_FIND in columns[0].text:
+                target_row = columns
+                break
+        
+        if not target_row:
+            print(f"Could not find station {STATION_ID_TO_FIND} in the table.")
+            return None
 
+        # ดึงข้อมูลจากคอลัมน์ต่างๆ ตามลำดับในตาราง
+        station_name = target_row[0].text.strip()
+        water_level_str = target_row[2].text.strip() # ระดับน้ำ (ม.รทก.)
+        bank_level_str = target_row[3].text.strip() # ระดับตลิ่ง (ม.รทก.)
+
+        print(f"Found station: {station_name}")
+        print(f"  - Water Level: {water_level_str} m.")
+        print(f"  - Bank Level: {bank_level_str} m.")
+
+        # แปลงค่าเป็นตัวเลข
         water_level = float(water_level_str)
         bank_level = float(bank_level_str)
         overflow = water_level - bank_level
 
         return {
-            "station": station_name_full,
+            "station": station_name,
             "water_level": water_level,
             "bank_level": bank_level,
             "overflow": overflow

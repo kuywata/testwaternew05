@@ -22,8 +22,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # --- ส่วนนี้คือส่วนที่ต้องเพิ่มเข้ามา ---
       - name: Run In Buri scraper script
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
         run: python inburi_scraper.py
+      # --- จบส่วนที่ต้องเพิ่ม ---

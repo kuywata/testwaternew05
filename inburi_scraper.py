@@ -18,7 +18,7 @@ def get_inburi_river_data():
     """ดึงข้อมูลระดับน้ำ, ระดับตลิ่ง และคำนวณส่วนต่างจากสถานี C.35 อินทร์บุรี"""
     try:
         print(f"Fetching data from RID website for station {STATION_NAME}...")
-        response = requests.get(STATION_URL, timeout=15)
+        response = requests.get(STATION_URL, timeout=15, verify=False)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
 

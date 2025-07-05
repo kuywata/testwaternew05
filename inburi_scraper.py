@@ -3,6 +3,15 @@ from bs4 import BeautifulSoup
 import os
 from datetime import datetime
 import pytz
+import time
+
+# --- เพิ่ม Library ของ Selenium ---
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
 
 # --- การตั้งค่าทั่วไป ---
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
@@ -10,32 +19,43 @@ LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
 TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 
 # --- การตั้งค่าสำหรับสคริปต์นี้โดยเฉพาะ ---
-STATION_URL = "https://singburi.thaiwater.net/wl" # <-- เปลี่ยนเป็น URL ใหม่ที่คุณให้มา
+STATION_URL = "https://singburi.thaiwater.net/wl"
 LAST_DATA_FILE = 'last_inburi_data.txt'
-STATION_ID_TO_FIND = "C.35" # <-- ID ของสถานีที่ต้องการค้นหา (อ.อินทร์บุรี)
+STATION_ID_TO_FIND = "C.35"
 
 def get_inburi_river_data():
-    """ดึงข้อมูลระดับน้ำจากตารางในหน้าเว็บ singburi.thaiwater.net"""
+    """ดึงข้อมูลระดับน้ำโดยใช้ Selenium เพื่อรอ JavaScript โหลดข้อมูล"""
+    print("Setting up Selenium Chrome driver...")
+    options = webdriver.ChromeOptions()
+    options.add_argument('--headless')  # รันเบราว์เซอร์แบบไม่มีหน้าจอ (สำคัญสำหรับ GitHub Actions)
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    
+    driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
+    
     try:
-        print(f"Fetching data from {STATION_URL} for station {STATION_ID_TO_FIND}...")
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        response = requests.get(STATION_URL, headers=headers, timeout=20)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
+        print(f"Fetching data from {STATION_URL} with Selenium...")
+        driver.get(STATION_URL)
 
-        # ค้นหาตารางข้อมูลจาก id 'tele_wl'
+        # --- ส่วนสำคัญ: รอให้ตารางโหลดเสร็จก่อนค่อยทำงานต่อ (รอสูงสุด 30 วินาที) ---
+        print("Waiting for data table to be loaded by JavaScript...")
+        wait = WebDriverWait(driver, 30)
+        table_element = wait.until(EC.presence_of_element_located((By.ID, 'tele_wl')))
+        
+        print("Table found! Parsing data...")
+        # เมื่อตารางโหลดเสร็จแล้ว ให้ดึง HTML ทั้งหน้ามาให้ BeautifulSoup ทำงานต่อ
+        page_html = driver.page_source
+        soup = BeautifulSoup(page_html, 'html.parser')
+
+        # โค้ดส่วนที่เหลือเหมือนเดิม เพราะเราได้ HTML ที่สมบูรณ์มาแล้ว
         table = soup.find('table', id='tele_wl')
         if not table:
-            print("Could not find the data table on the page.")
+            print("Something went wrong, table disappeared after finding it.")
             return None
 
-        # วนลูปหาแถว (tr) ที่มีข้อมูลสถานี C.35
         target_row = None
         for row in table.find('tbody').find_all('tr'):
             columns = row.find_all('td')
-            # คอลัมน์แรก (index 0) คือชื่อสถานี
             if columns and STATION_ID_TO_FIND in columns[0].text:
                 target_row = columns
                 break
@@ -44,16 +64,14 @@ def get_inburi_river_data():
             print(f"Could not find station {STATION_ID_TO_FIND} in the table.")
             return None
 
-        # ดึงข้อมูลจากคอลัมน์ต่างๆ ตามลำดับในตาราง
         station_name = target_row[0].text.strip()
-        water_level_str = target_row[2].text.strip() # ระดับน้ำ (ม.รทก.)
-        bank_level_str = target_row[3].text.strip() # ระดับตลิ่ง (ม.รทก.)
+        water_level_str = target_row[2].text.strip()
+        bank_level_str = target_row[3].text.strip()
 
         print(f"Found station: {station_name}")
         print(f"  - Water Level: {water_level_str} m.")
         print(f"  - Bank Level: {bank_level_str} m.")
 
-        # แปลงค่าเป็นตัวเลข
         water_level = float(water_level_str)
         bank_level = float(bank_level_str)
         overflow = water_level - bank_level
@@ -65,24 +83,22 @@ def get_inburi_river_data():
             "overflow": overflow
         }
 
-    except (requests.exceptions.RequestException, AttributeError, ValueError, IndexError) as e:
+    except Exception as e:
         print(f"An error occurred in get_inburi_river_data: {e}")
         return None
+    finally:
+        print("Closing Selenium driver.")
+        driver.quit()
+
+# ----- ฟังก์ชันอื่นๆ เหมือนเดิม ไม่ต้องแก้ไข -----
 
 def send_line_message(data):
-    """ส่งข้อความแจ้งเตือนระดับน้ำของอินทร์บุรี"""
     now_thailand = datetime.now(TIMEZONE_THAILAND)
     formatted_datetime = now_thailand.strftime("%d/%m/%Y %H:%M น.")
-
     if data['overflow'] > 0:
-        status_text = "⚠️ *น้ำล้นตลิ่ง*"
-        status_icon = "🚨"
-        overflow_text = f"{data['overflow']:.2f} ม."
+        status_text, status_icon, overflow_text = "⚠️ *น้ำล้นตลิ่ง*", "🚨", f"{data['overflow']:.2f} ม."
     else:
-        status_text = "✅ *ระดับน้ำปกติ*"
-        status_icon = "🌊"
-        overflow_text = f"ต่ำกว่าตลิ่ง {-data['overflow']:.2f} ม."
-
+        status_text, status_icon, overflow_text = "✅ *ระดับน้ำปกติ*", "🌊", f"ต่ำกว่าตลิ่ง {-data['overflow']:.2f} ม."
     message = (
         f"{status_icon} *แจ้งเตือนระดับน้ำแม่น้ำเจ้าพระยา*\n"
         f"📍 *พื้นที่: {data['station']}*\n"
@@ -94,11 +110,9 @@ def send_line_message(data):
         f"({overflow_text})\n\n"
         f"🗓️ {formatted_datetime}"
     )
-
     url = 'https://api.line.me/v2/bot/message/push'
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'}
     payload = {'to': LINE_TARGET_ID, 'messages': [{'type': 'text', 'text': message}]}
-
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=10)
         response.raise_for_status()
@@ -108,28 +122,21 @@ def send_line_message(data):
 
 def read_last_data(file_path):
     if os.path.exists(file_path):
-        with open(file_path, 'r') as f:
-            return f.read().strip()
+        with open(file_path, 'r') as f: return f.read().strip()
     return ""
 
 def write_data(file_path, data):
-    with open(file_path, 'w') as f:
-        f.write(data)
+    with open(file_path, 'w') as f: f.write(data)
 
 def main():
-    """ตรรกะหลักของโปรแกรม"""
     current_data_dict = get_inburi_river_data()
-    
     if current_data_dict is None:
         print("Could not retrieve current data. Exiting.")
         return
-
     current_data_str = f"{current_data_dict['water_level']:.2f}"
     last_data_str = read_last_data(LAST_DATA_FILE)
-
     print(f"Current data string: {current_data_str}")
     print(f"Last data string: {last_data_str}")
-
     if current_data_str != last_data_str:
         print("Data has changed! Processing notification...")
         send_line_message(current_data_dict)

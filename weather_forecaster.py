@@ -10,24 +10,20 @@ LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
 OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY')
 IN_BURI_LAT = 15.02
 IN_BURI_LON = 100.34
-# ชื่อไฟล์สำหรับบันทึกสถานะพยากรณ์ล่าสุด
-LAST_FORECAST_FILE = 'last_forecast.txt'
+# --- เปลี่ยนแปลง: ไฟล์สำหรับบันทึก ID ของพยากรณ์ล่าสุด ---
+LAST_FORECAST_ID_FILE = 'last_forecast_id.txt'
 
 # --- การตั้งค่าการแจ้งเตือน (แนะนำสำหรับ "ความแม่นยำสูงสุด") ---
-# ตั้งค่าความน่าจะเป็นของฝนขั้นต่ำ (0.8 = 80%)
 RAIN_CONFIDENCE_THRESHOLD = 0.8
-# ปริมาณน้ำฝนขั้นต่ำที่คาดการณ์ (หน่วย: มิลลิเมตร) ถึงจะแจ้งเตือน
 MIN_RAIN_VOLUME_MM = 1.0
-# ต้องเจอฝนตกหนักติดต่อกันกี่ช่วงเวลา (2 ช่วง = ยืนยันแนวโน้ม 6 ชม. เต็ม)
 CONSECUTIVE_PERIODS_NEEDED = 2
-# จำนวนช่วงเวลาที่จะตรวจสอบล่วงหน้า (2 ช่วง = 6 ชั่วโมง)
 FORECAST_PERIODS_TO_CHECK = 2
 
 
 def get_weather_forecast():
     """
-    ดึงข้อมูลพยากรณ์และตรวจสอบหาฝน/พายุที่เข้าเงื่อนไข "ยืนยันหลายชั้น"
-    - ถ้าพบ: คืนค่าเป็นข้อความพยากรณ์
+    ดึงข้อมูลพยากรณ์และตรวจสอบหาฝน/พายุที่เข้าเงื่อนไข
+    - ถ้าพบ: คืนค่าเป็น object ของ forecast แรกที่เข้าเงื่อนไข
     - ถ้าไม่พบ: คืนค่าเป็น "NO_RAIN"
     - ถ้ามีข้อผิดพลาด: คืนค่าเป็น None
     """
@@ -35,7 +31,6 @@ def get_weather_forecast():
         print("OPENWEATHER_API_KEY is not set. Skipping.")
         return None
 
-    # ขอข้อมูลให้ครอบคลุมจำนวนช่วงเวลาที่ต้องการตรวจสอบ
     url = f"https://api.openweathermap.org/data/2.5/forecast?lat={IN_BURI_LAT}&lon={IN_BURI_LON}&appid={OPENWEATHER_API_KEY}&units=metric&lang=th&cnt={FORECAST_PERIODS_TO_CHECK}"
 
     try:
@@ -48,52 +43,23 @@ def get_weather_forecast():
         for forecast in forecast_data.get('list', []):
             weather_id = str(forecast.get('weather', [{}])[0].get('id', ''))
             pop = forecast.get('pop', 0)
-            # ดึงปริมาณน้ำฝนใน 3 ชั่วโมงล่าสุด (ถ้ามี)
             rain_volume = forecast.get('rain', {}).get('3h', 0)
 
-            # --- Logic การตรวจสอบแบบใหม่ (ยืนยันหลายชั้น) ---
-            # 1. เป็นฝน (ID 5xx) หรือ พายุฝนฟ้าคะนอง (ID 2xx)
             is_rain_or_storm = weather_id.startswith('5') or weather_id.startswith('2')
-            # 2. มีความน่าจะเป็นสูง
             is_confident_pop = pop >= RAIN_CONFIDENCE_THRESHOLD
-            # 3. มีปริมาณน้ำฝนมากพอ
             is_significant_volume = rain_volume >= MIN_RAIN_VOLUME_MM
 
             print(f"Checking forecast at {datetime.fromtimestamp(forecast['dt'])}: ID {weather_id}, POP: {pop*100:.0f}%, Rain: {rain_volume}mm")
 
             if is_rain_or_storm and is_confident_pop and is_significant_volume:
-                # ถ้าเข้าเงื่อนไขทั้งหมด ให้เก็บ forecast นี้ไว้
                 confident_periods.append(forecast)
             else:
-                # ถ้ามีช่วงไหนไม่เข้าเงื่อนไข ให้ล้างลิสต์แล้วเริ่มนับใหม่ (สำหรับความเข้มงวดสูงสุด)
                 confident_periods = []
 
-            # 4. ตรวจสอบว่าเจอติดต่อกันตามจำนวนที่กำหนดหรือยัง
             if len(confident_periods) >= CONSECUTIVE_PERIODS_NEEDED:
                 print(f"SUCCESS: Found {len(confident_periods)} consecutive periods of heavy rain/storm.")
-
-                # ใช้ข้อมูลของช่วงเวลาแรกที่เข้าเงื่อนไขในการสร้างข้อความ
-                first_strong_forecast = confident_periods[0]
-                weather = first_strong_forecast.get('weather', [{}])[0]
-                
-                # ดึงปริมาณฝนของช่วงเวลาแรกมาแสดงผล
-                first_rain_volume = first_strong_forecast.get('rain', {}).get('3h', 0)
-
-                tz_thailand = pytz.timezone('Asia/Bangkok')
-                forecast_time_utc = datetime.fromtimestamp(first_strong_forecast['dt'])
-                forecast_time_th = forecast_time_utc.astimezone(tz_thailand)
-
-                # เพิ่ม Emoji ตามประเภทของสภาพอากาศ
-                icon = "⛈️" if str(weather.get('id')).startswith('2') else "🌧️"
-
-                message = (f"{icon} *พยากรณ์ฝนตกหนัก/พายุ (ยืนยันแล้ว)*\n"
-                           f"━━━━━━━━━━━━━━\n"
-                           f"*พื้นที่: อ.อินทร์บุรี, สิงห์บุรี*\n\n"
-                           f"▶️ *คาดการณ์:* {weather.get('description', 'N/A')}\n"
-                           f"💧 *ปริมาณฝน:* ~{first_rain_volume:.1f} mm\n"
-                           f"🗓️ *เวลาเริ่มประมาณ:* {forecast_time_th.strftime('%H:%M น.')} ({forecast_time_th.strftime('%d/%m')})")
-
-                return message
+                # --- เปลี่ยนแปลง: คืนค่า object ของ forecast แรกที่เจอ ไม่ใช่ข้อความ ---
+                return confident_periods[0]
 
         print(f"No consecutive heavy rain/storm detected meeting all criteria.")
         return "NO_RAIN"
@@ -101,6 +67,25 @@ def get_weather_forecast():
     except (requests.exceptions.RequestException, json.JSONDecodeError, KeyError) as e:
         print(f"An error occurred in get_weather_forecast: {e}")
         return None
+
+def format_forecast_message(forecast_object): # <--- เปลี่ยนแปลง: สร้างฟังก์ชันใหม่สำหรับจัดรูปแบบข้อความโดยเฉพาะ
+    """จัดรูปแบบข้อความ LINE จาก object พยากรณ์"""
+    weather = forecast_object.get('weather', [{}])[0]
+    rain_volume = forecast_object.get('rain', {}).get('3h', 0)
+    
+    tz_thailand = pytz.timezone('Asia/Bangkok')
+    forecast_time_utc = datetime.fromtimestamp(forecast_object['dt'])
+    forecast_time_th = forecast_time_utc.astimezone(tz_thailand)
+
+    icon = "⛈️" if str(weather.get('id')).startswith('2') else "🌧️"
+
+    message = (f"{icon} *พยากรณ์ฝนตกหนัก/พายุ (ยืนยันแล้ว)*\n"
+               f"━━━━━━━━━━━━━━\n"
+               f"*พื้นที่: อ.อินทร์บุรี, สิงห์บุรี*\n\n"
+               f"▶️ *คาดการณ์:* {weather.get('description', 'N/A')}\n"
+               f"💧 *ปริมาณฝน:* ~{rain_volume:.1f} mm\n"
+               f"🗓️ *เวลาเริ่มประมาณ:* {forecast_time_th.strftime('%H:%M น.')} ({forecast_time_th.strftime('%d/%m')})")
+    return message
 
 def send_line_message(message):
     """ส่งข้อความไปยัง LINE"""
@@ -110,7 +95,6 @@ def send_line_message(message):
 
     tz_thailand = pytz.timezone('Asia/Bangkok')
     now_thailand = datetime.now(tz_thailand)
-
     formatted_datetime = now_thailand.strftime("%d/%m/%Y %H:%M:%S")
     full_message = f"{message}\n\nอัปเดต: {formatted_datetime}"
 
@@ -139,24 +123,44 @@ def write_data(file_path, data):
 
 def main():
     """ตรรกะหลักของโปรแกรม"""
-    last_forecast = read_last_data(LAST_FORECAST_FILE)
-    current_forecast = get_weather_forecast()
+    # --- เปลี่ยนแปลง: อ่าน ID ล่าสุด ไม่ใช่ข้อความล่าสุด ---
+    last_notified_id = read_last_data(LAST_FORECAST_ID_FILE)
+    
+    # ดึงข้อมูล forecast ที่เป็น object หรือ string "NO_RAIN"
+    current_forecast_object = get_weather_forecast()
 
-    if current_forecast is not None and current_forecast != last_forecast:
-        print(f"Forecast has changed from '{last_forecast}' to '{current_forecast}'.")
+    if current_forecast_object is None:
+        print("Could not retrieve weather forecast. Skipping.")
+        return
 
-        if current_forecast != "NO_RAIN":
-            print("Sending LINE notification for new high-confidence rain forecast...")
-            send_line_message(current_forecast)
-        else:
-            print("Forecast changed to 'NO_RAIN'. Not sending a notification, just updating status.")
-
-        write_data(LAST_FORECAST_FILE, current_forecast)
+    current_status_id = ""
+    # --- เปลี่ยนแปลง: ตรรกะใหม่ทั้งหมดในการตัดสินใจส่ง ---
+    if isinstance(current_forecast_object, dict):
+        # ถ้าเป็นฝน ให้ใช้ 'dt' เป็น ID
+        current_status_id = str(current_forecast_object.get('dt', ''))
     else:
-        if current_forecast is None:
-            print("Could not retrieve weather forecast. Skipping.")
+        # ถ้าไม่ใช่ฝน (เช่น "NO_RAIN") ให้ใช้ตัวอักษรเป็น ID
+        current_status_id = current_forecast_object
+
+    # เปรียบเทียบ ID ไม่ใช่ข้อความ
+    if current_status_id != last_notified_id:
+        print(f"Forecast ID has changed from '{last_notified_id}' to '{current_status_id}'.")
+
+        # ตรวจสอบว่า forecast ใหม่เป็นฝนหรือไม่
+        if isinstance(current_forecast_object, dict):
+            print("New high-confidence rain detected. Formatting and sending LINE notification...")
+            # จัดรูปแบบข้อความจาก object ที่ได้มา
+            message_to_send = format_forecast_message(current_forecast_object)
+            send_line_message(message_to_send)
         else:
-            print("Forecast has not changed. No action needed.")
+            # ถ้าเปลี่ยนเป็น "NO_RAIN" ก็แค่บันทึกสถานะ ไม่ต้องส่งแจ้งเตือน
+            print("Forecast changed to 'NO_RAIN'. No notification needed.")
+        
+        # บันทึก ID ใหม่ลงไฟล์
+        write_data(LAST_FORECAST_ID_FILE, current_status_id)
+    else:
+        print("Forecast ID has not changed. No action needed.")
+
 
 if __name__ == "__main__":
     main()

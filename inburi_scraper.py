@@ -7,35 +7,33 @@ import time
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager # ◀️ 1. เพิ่มบรรทัดนี้
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 # --- การตั้งค่าทั่วไป ---
-LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
-LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
-TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
+# ... (ส่วนนี้เหมือนเดิม)
 
 # --- การตั้งค่าสำหรับสคริปต์นี้โดยเฉพาะ ---
-STATION_URL = "https://singburi.thaiwater.net/wl"
-LAST_DATA_FILE = 'last_inburi_data.txt'
-STATION_ID_TO_FIND = "C.35"
+# ... (ส่วนนี้เหมือนเดิม)
 
 def get_inburi_river_data():
     """ดึงข้อมูลระดับน้ำโดยใช้ Selenium เพื่อรอ JavaScript โหลดข้อมูล"""
     print("Setting up Selenium Chrome driver with robust options for GitHub Actions...")
     options = webdriver.ChromeOptions()
     
-    # --- 🎯 ส่วนที่แก้ไข ---
-    # เพิ่ม Arguments เพื่อให้ Chrome ทำงานในโหมด Headless ได้อย่างเสถียรที่สุด
-    options.add_argument("--headless=new")  # ใช้โหมด Headless แบบใหม่
+    options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu") # ปิดการใช้งาน GPU ซึ่งไม่จำเป็นใน Server
-    options.add_argument("--window-size=1920,1080") # กำหนดขนาดหน้าจอเสมือน
-    # --- จบส่วนที่แก้ไข ---
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
 
-    service = ChromeService()
+    # --- 🎯 ส่วนที่แก้ไข ---
+    # ใช้ webdriver-manager เพื่อติดตั้งและจัดการ chromedriver โดยอัตโนมัติ
+    service = ChromeService(ChromeDriverManager().install())
+    # --- จบส่วนที่แก้ไข ---
+    
     driver = webdriver.Chrome(service=service, options=options)
     
     try:
@@ -43,6 +41,7 @@ def get_inburi_river_data():
         driver.get(STATION_URL)
 
         print("Waiting for data table to be loaded by JavaScript...")
+        # (ส่วนที่เหลือของฟังก์ชันเหมือนเดิมทั้งหมด)
         wait = WebDriverWait(driver, 30)
         table_element = wait.until(EC.presence_of_element_located((By.ID, 'tele_wl')))
         
@@ -87,10 +86,17 @@ def get_inburi_river_data():
 
     except Exception as e:
         print(f"An error occurred in get_inburi_river_data: {e}")
+        # เพิ่มการ print stack trace เพื่อให้ debug ง่ายขึ้นในอนาคต (optional)
+        import traceback
+        traceback.print_exc()
         return None
     finally:
         print("Closing Selenium driver.")
         driver.quit()
+
+#
+# ... ส่วนที่เหลือของไฟล์ (send_line_message, main, etc.) ไม่ต้องแก้ไข ...
+#
 
 def send_line_message(data):
     now_thailand = datetime.now(TIMEZONE_THAILAND)

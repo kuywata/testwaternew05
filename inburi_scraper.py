@@ -107,7 +107,7 @@ def send_line_message(data):
     else:
         status_text, status_icon, overflow_text = "✅ *ระดับน้ำปกติ*", "🌊", f"ต่ำกว่าตลิ่ง {-data['overflow']:.2f} ม."
         
-    message = ( f"{status_icon} *แจ้งเตือนระดับน้ำแม่น้ำเจ้าพระยา*\n" f"📍 *พื้นที่: {data['station']}*\n" f"━━━━━━━━━━━━━━\n" f"💧 *ระดับน้ำปัจจุบัน:* {data['water_level']:.2f} ม. (รทก.)\n" f"🏞️ *ระดับขอบตลิ่ง:* {data['bank_level']:.2f} ม. (รทก.)\n" f"━━━━━━━━━━━━━━\n" f"📊 *สถานะ:* {status_text}\n" f"({overflow_text})\n\n" f"🗓️ {formatted_datetime}" )
+    message = ( f"{status_icon} *แจ้งเตือนระดับน้ำแม่น้ำเจ้าพระยา*\n" f"📍 *พื้นที่: {data['station']}*\n" f"━━━━━━━━━\n" f"💧 *ระดับน้ำปัจจุบัน:* {data['water_level']:.2f} ม. (รทก.)\n" f"🏞️ *ระดับขอบตลิ่ง:* {data['bank_level']:.2f} ม. (รทก.)\n" f"━━━━━━━━━\n" f"📊 *สถานะ:* {status_text}\n" f"({overflow_text})\n\n" f"🗓️ {formatted_datetime}" )
     url = 'https://api.line.me/v2/bot/message/push'
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'}
     payload = {'to': LINE_TARGET_ID, 'messages': [{'type': 'text', 'text': message}]}

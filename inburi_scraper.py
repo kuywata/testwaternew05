@@ -5,13 +5,11 @@ from datetime import datetime
 import pytz
 import time
 
-# --- เพิ่ม Library ของ Selenium ---
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-# from webdriver_manager.chrome import ChromeDriverManager # <<< ไม่จำเป็นต้องใช้อีกต่อไป
 
 # --- การตั้งค่าทั่วไป ---
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
@@ -25,19 +23,20 @@ STATION_ID_TO_FIND = "C.35"
 
 def get_inburi_river_data():
     """ดึงข้อมูลระดับน้ำโดยใช้ Selenium เพื่อรอ JavaScript โหลดข้อมูล"""
-    print("Setting up Selenium Chrome driver for GitHub Actions environment...")
+    print("Setting up Selenium Chrome driver with robust options for GitHub Actions...")
     options = webdriver.ChromeOptions()
-    options.add_argument('--headless')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
     
     # --- 🎯 ส่วนที่แก้ไข ---
-    # เปลี่ยนจากการใช้ ChromeDriverManager มาเป็นการเรียกใช้ Service โดยตรง
-    # วิธีนี้จะทำให้ Selenium ไปใช้ ChromeDriver ที่มีอยู่แล้วในเครื่องของ GitHub Actions
-    # ซึ่งมีความเสถียรมากกว่าและแก้ปัญหาการแครชได้
+    # เพิ่ม Arguments เพื่อให้ Chrome ทำงานในโหมด Headless ได้อย่างเสถียรที่สุด
+    options.add_argument("--headless=new")  # ใช้โหมด Headless แบบใหม่
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu") # ปิดการใช้งาน GPU ซึ่งไม่จำเป็นใน Server
+    options.add_argument("--window-size=1920,1080") # กำหนดขนาดหน้าจอเสมือน
+    # --- จบส่วนที่แก้ไข ---
+
     service = ChromeService()
     driver = webdriver.Chrome(service=service, options=options)
-    # --- จบส่วนที่แก้ไข ---
     
     try:
         print(f"Fetching data from {STATION_URL} with Selenium...")

@@ -11,7 +11,7 @@ from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
+# from webdriver_manager.chrome import ChromeDriverManager # <<< ไม่จำเป็นต้องใช้อีกต่อไป
 
 # --- การตั้งค่าทั่วไป ---
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
@@ -25,32 +25,35 @@ STATION_ID_TO_FIND = "C.35"
 
 def get_inburi_river_data():
     """ดึงข้อมูลระดับน้ำโดยใช้ Selenium เพื่อรอ JavaScript โหลดข้อมูล"""
-    print("Setting up Selenium Chrome driver...")
+    print("Setting up Selenium Chrome driver for GitHub Actions environment...")
     options = webdriver.ChromeOptions()
-    options.add_argument('--headless')  # รันเบราว์เซอร์แบบไม่มีหน้าจอ (สำคัญสำหรับ GitHub Actions)
+    options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     
-    driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
+    # --- 🎯 ส่วนที่แก้ไข ---
+    # เปลี่ยนจากการใช้ ChromeDriverManager มาเป็นการเรียกใช้ Service โดยตรง
+    # วิธีนี้จะทำให้ Selenium ไปใช้ ChromeDriver ที่มีอยู่แล้วในเครื่องของ GitHub Actions
+    # ซึ่งมีความเสถียรมากกว่าและแก้ปัญหาการแครชได้
+    service = ChromeService()
+    driver = webdriver.Chrome(service=service, options=options)
+    # --- จบส่วนที่แก้ไข ---
     
     try:
         print(f"Fetching data from {STATION_URL} with Selenium...")
         driver.get(STATION_URL)
 
-        # --- ส่วนสำคัญ: รอให้ตารางโหลดเสร็จก่อนค่อยทำงานต่อ (รอสูงสุด 30 วินาที) ---
         print("Waiting for data table to be loaded by JavaScript...")
         wait = WebDriverWait(driver, 30)
         table_element = wait.until(EC.presence_of_element_located((By.ID, 'tele_wl')))
         
         print("Table found! Parsing data...")
-        # เมื่อตารางโหลดเสร็จแล้ว ให้ดึง HTML ทั้งหน้ามาให้ BeautifulSoup ทำงานต่อ
         page_html = driver.page_source
         soup = BeautifulSoup(page_html, 'html.parser')
 
-        # โค้ดส่วนที่เหลือเหมือนเดิม เพราะเราได้ HTML ที่สมบูรณ์มาแล้ว
         table = soup.find('table', id='tele_wl')
         if not table:
-            print("Something went wrong, table disappeared after finding it.")
+            print("Something went wrong, table with id 'tele_wl' not found.")
             return None
 
         target_row = None
@@ -89,8 +92,6 @@ def get_inburi_river_data():
     finally:
         print("Closing Selenium driver.")
         driver.quit()
-
-# ----- ฟังก์ชันอื่นๆ เหมือนเดิม ไม่ต้องแก้ไข -----
 
 def send_line_message(data):
     now_thailand = datetime.now(TIMEZONE_THAILAND)

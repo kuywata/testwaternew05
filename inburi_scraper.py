@@ -4,10 +4,14 @@ import json
 from datetime import datetime
 import pytz
 from bs4 import BeautifulSoup
+
+# เพิ่ม import ที่จำเป็นสำหรับ Selenium
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
 from selenium.common.exceptions import TimeoutException
 
 # --- การตั้งค่าทั่วไป ---
@@ -23,8 +27,8 @@ NOTIFICATION_THRESHOLD_METERS = 0.20
 
 def get_inburi_river_data():
     """
-    ดึงข้อมูลโดยใช้ Selenium เพื่อรอให้ JavaScript ของเว็บทำงานเสร็จก่อน
-    จากนั้นจึงดึงข้อมูล JSON ที่ซ่อนอยู่ใน <script>
+    ดึงข้อมูลโดยใช้ Selenium และรอจนกว่า 'ตารางข้อมูล' จะแสดงผล
+    ซึ่งเป็นวิธีที่เสถียรกว่าการรอ JavaScript variable โดยตรง
     """
     print("Initializing Selenium WebDriver...")
     
@@ -39,18 +43,23 @@ def get_inburi_river_data():
         service = ChromeService(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
         
+        wait_timeout = 60  # เพิ่มเวลารอเป็น 60 วินาที
+        
         print(f"Navigating to {STATION_URL}...")
         driver.get(STATION_URL)
         print(f"Page title is: '{driver.title}'")
 
-        print("Waiting for JavaScript variable 'tele_data_wl' to be available...")
-        # รอจนกว่าตัวแปร tele_data_wl จะถูกสร้างขึ้นและมีข้อมูล (ไม่ใช่ array ว่าง)
-        WebDriverWait(driver, 30).until(
-            lambda d: d.execute_script("return typeof tele_data_wl !== 'undefined' && tele_data_wl.length > 0;")
+        # --- ส่วนที่แก้ไข ---
+        # เปลี่ยนจากการรอตัวแปร JavaScript เป็นการรอให้ 'แถวแรกของตารางข้อมูล' ปรากฏขึ้น
+        print(f"Waiting for up to {wait_timeout} seconds for the data table (#wl-table) to be populated...")
+        WebDriverWait(driver, wait_timeout).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "#wl-table tbody tr"))
         )
-        print("JavaScript variable found. Parsing data...")
+        # --------------------
         
+        print("Data table is present. Parsing data...")
         html_content = driver.page_source
+        
         soup = BeautifulSoup(html_content, 'html.parser')
         scripts = soup.find_all('script')
         
@@ -64,7 +73,7 @@ def get_inburi_river_data():
                 break
         
         if not json_data_string:
-            print("Could not find JavaScript variable 'tele_data_wl' in the page source.")
+            print("Could not find JavaScript variable 'tele_data_wl' even after the table appeared.")
             return None
 
         all_stations_data = json.loads(json_data_string)
@@ -85,9 +94,9 @@ def get_inburi_river_data():
         return {"station": station_name, "water_level": water_level, "bank_level": bank_level, "overflow": overflow}
 
     except TimeoutException:
-        print("Error: Timed out waiting for page/JavaScript to load.")
+        print(f"Error: Timed out after {wait_timeout} seconds waiting for the data table to appear.")
         if driver:
-            print("Page source at the time of timeout:")
+            print("Page source at the time of timeout (first 2000 chars):")
             print(driver.page_source[:2000]) 
         return None
     except Exception as e:

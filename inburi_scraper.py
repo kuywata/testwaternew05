@@ -3,13 +3,13 @@ from bs4 import BeautifulSoup
 import os
 from datetime import datetime
 import pytz
+import time # 🎯 เพิ่ม: Import 'time' สำหรับการหน่วงเวลา
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-# --- 🎯 การเปลี่ยนแปลงที่ 1: Import webdriver-manager ---
 from webdriver_manager.chrome import ChromeDriverManager
 
 # --- การตั้งค่าทั่วไป ---
@@ -27,23 +27,29 @@ NOTIFICATION_THRESHOLD_METERS = 0.20
 
 def get_inburi_river_data():
     """ดึงข้อมูลระดับน้ำโดยใช้ Selenium เพื่อรอ JavaScript โหลดข้อมูล"""
-    print("Setting up Selenium Chrome driver with robust options for GitHub Actions...")
+    print("Setting up Selenium Chrome driver with more robust options...")
     options = webdriver.ChromeOptions()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
+    # --- 🎯 เพิ่ม: ปลอมตัวเป็นเบราว์เซอร์ปกติ และปิด Automation flags ---
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36")
+    options.add_argument("--disable-blink-features=AutomationControlled")
     
-    # --- 🎯 การเปลี่ยนแปลงที่ 2: ใช้ ChromeDriverManager เพื่อติดตั้งและจัดการ driver อัตโนมัติ ---
     service = ChromeService(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
     
     try:
-        print(f"Fetching data from {STATION_URL} with Selenium...")
+        print(f"Fetching data from {STATION_URL}...")
         driver.get(STATION_URL)
+        
+        # --- 🎯 เพิ่ม: หน่วงเวลา 5 วินาทีเพื่อให้ JavaScript ของเว็บโหลดจนเสร็จ ---
+        print("Waiting for 5 seconds to let the page settle...")
+        time.sleep(5)
 
-        print("Waiting for data table to be loaded by JavaScript...")
+        print("Waiting for data table to be present in DOM...")
         wait = WebDriverWait(driver, 30)
         wait.until(EC.presence_of_element_located((By.ID, 'tele_wl')))
         
@@ -88,6 +94,10 @@ def get_inburi_river_data():
 
     except Exception as e:
         print(f"An error occurred in get_inburi_river_data: {e}")
+        # เพิ่มการบันทึกหน้าเว็บเพื่อดีบัก
+        # driver.save_screenshot('error_screenshot.png')
+        # with open('error_page.html', 'w', encoding='utf-8') as f:
+        #     f.write(driver.page_source)
         return None
     finally:
         print("Closing Selenium driver.")

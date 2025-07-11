@@ -1,18 +1,16 @@
 name: Check In Buri River Level
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '15 * * * *'
-
-permissions:
-  contents: write
+    - cron: '0 * * * *' # รันทุกชั่วโมง
+  workflow_dispatch: # อนุญาตให้รันด้วยมือ
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Check out repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -20,32 +18,22 @@ jobs:
         with:
           python-version: '3.10'
 
-      # --- ส่วนที่เพิ่มเข้ามาสำหรับ Selenium ---
-      - name: Install Google Chrome
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
-      # --- จบส่วนที่เพิ่ม ---
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run In Buri scraper script
+      - name: Run scraper and send notification
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
         run: python inburi_scraper.py
 
-      - name: Commit and push if changed
+      - name: Commit and push data file
         run: |
-          if [ -f last_inburi_data.txt ]; then
-            git config --local user.email "action@github.com"
-            git config --local user.name "GitHub Action"
-            git pull
-            git add last_inburi_data.txt
-            git diff --quiet && git diff --staged --quiet || (git commit -m "Update In Buri river data" && git push)
-          else
-            echo "last_inburi_data.txt not found, skipping commit."
-          fi
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git pull
+          git add last_inburi_data.txt
+          # Commit และ Push เฉพาะเมื่อมีการเปลี่ยนแปลงในไฟล์เท่านั้น
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update last river data" && git push)

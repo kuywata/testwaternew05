@@ -10,7 +10,7 @@ from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager # 👈 [เพิ่ม] import ที่จำเป็น
+from webdriver_manager.chrome import ChromeDriverManager
 
 # --- การตั้งค่าทั่วไป ---
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
@@ -22,35 +22,34 @@ STATION_URL = "https://singburi.thaiwater.net/wl"
 LAST_DATA_FILE = 'last_inburi_data.txt'
 STATION_ID_TO_FIND = "C.35"
 
+
 def get_inburi_river_data():
     """ดึงข้อมูลระดับน้ำโดยใช้ Selenium เพื่อรอ JavaScript โหลดข้อมูล"""
     print("Setting up Selenium Chrome driver with robust options for GitHub Actions...")
     options = webdriver.ChromeOptions()
-    
+
+    # เปิดใช้งานโหมด Headless แบบใหม่ พร้อมปรับแต่งสำหรับ CI
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
 
-    # --- 🎯 ส่วนที่แก้ไข ---
-    # ใช้ webdriver-manager เพื่อติดตั้งและจัดการ chromedriver โดยอัตโนมัติ
-    # ทำให้สคริปต์มีความเสถียรมากขึ้นเมื่อรันบน GitHub Actions
-    print("Installing/Updating chromedriver with webdriver-manager...")
-    service = ChromeService(ChromeDriverManager().install())
-    # --- จบส่วนที่แก้ไข ---
-    
+    # ระบุตำแหน่ง binary ของ Chrome
+    options.binary_location = '/usr/bin/google-chrome-stable'
+
+    # ใช้ webdriver_manager ในการติดตั้ง chromedriver อัตโนมัติ
+    service = ChromeService(executable_path=ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
-    
+
     try:
         print(f"Fetching data from {STATION_URL} with Selenium...")
         driver.get(STATION_URL)
 
         print("Waiting for data table to be loaded by JavaScript...")
-        # เพิ่มเวลา timeout เป็น 60 วินาที เพื่อให้มีเวลาโหลดมากขึ้น
-        wait = WebDriverWait(driver, 60) 
+        wait = WebDriverWait(driver, 30)
         table_element = wait.until(EC.presence_of_element_located((By.ID, 'tele_wl')))
-        
+
         print("Table found! Parsing data...")
         page_html = driver.page_source
         soup = BeautifulSoup(page_html, 'html.parser')
@@ -66,7 +65,7 @@ def get_inburi_river_data():
             if columns and STATION_ID_TO_FIND in columns[0].text:
                 target_row = columns
                 break
-        
+
         if not target_row:
             print(f"Could not find station {STATION_ID_TO_FIND} in the table.")
             return None
@@ -97,6 +96,7 @@ def get_inburi_river_data():
         print("Closing Selenium driver.")
         driver.quit()
 
+
 def send_line_message(data):
     now_thailand = datetime.now(TIMEZONE_THAILAND)
     formatted_datetime = now_thailand.strftime("%d/%m/%Y %H:%M น.")
@@ -125,13 +125,16 @@ def send_line_message(data):
     except requests.exceptions.RequestException as e:
         print(f"Error sending LINE message: {e.response.text if e.response else 'No response'}")
 
+
 def read_last_data(file_path):
     if os.path.exists(file_path):
         with open(file_path, 'r') as f: return f.read().strip()
     return ""
 
+
 def write_data(file_path, data):
     with open(file_path, 'w') as f: f.write(data)
+
 
 def main():
     current_data_dict = get_inburi_river_data()
@@ -148,6 +151,7 @@ def main():
         write_data(LAST_DATA_FILE, current_data_str)
     else:
         print("Data has not changed. No action needed.")
+
 
 if __name__ == "__main__":
     main()

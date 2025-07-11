@@ -24,21 +24,25 @@ jobs:
         with:
           python-version: '3.10'
 
-      # 3. ติดตั้งไลบรารีที่จำเป็น (ไม่ต้องติดตั้ง Chrome แล้ว)
+      # 3. (สำคัญ) ติดตั้ง Google Chrome กลับมาอีกครั้ง
+      - name: Setup Chrome
+        uses: browser-actions/setup-chrome@latest
+      
+      # 4. ติดตั้งไลบรารีที่จำเป็น
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # 4. รันสคริปต์ Python
+      # 5. รันสคริปต์ Python
       - name: Run scraper
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
         run: python inburi_scraper.py
       
-      # 5. Commit ข้อมูลล่าสุด
+      # 6. Commit ข้อมูลล่าสุด
       - name: Commit and push if data changed
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add last_inburi_data.txt
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update last river data via API" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update last river data via Hybrid Scraper" && git push)

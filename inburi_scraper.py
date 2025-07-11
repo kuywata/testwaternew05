@@ -1,52 +1,59 @@
 import requests
 import json
 import urllib.parse
+from bs4 import BeautifulSoup
 
 # Constants
 BASE_URL = "https://singburi.thaiwater.net/wl"
-API_URL = "https://singburi.thaiwater.net/api/v1/tele_waterlevel"
+# เพิ่ม slash ท้าย API URL เพื่อให้แน่ใจว่าเรียก endpoint ถูกต้อง
+API_URL = "https://singburi.thaiwater.net/api/v1/tele_waterlevel/"
 STATION_ID_TO_FIND = 3724  # รหัสสถานีที่ต้องการค้นหา
 
 
 def get_inburi_river_data():
     """
-    ดึงข้อมูลโดยการเรียก API ของเว็บโดยตรง โดยใช้ Header ที่สมบูรณ์
+    ดึงข้อมูลโดยการเรียก API ของเว็บโดยตรง โดยใช้ Header และ CSRF token ที่ถูกต้อง
     """
     print("Attempting direct API call with comprehensive headers...")
     try:
         session = requests.Session()
 
-        # 1. สร้าง Header ที่สมบูรณ์เพื่อเลียนแบบเบราว์เซอร์
+        # 1. สร้าง Header พื้นฐานเพื่อเลียนแบบเบราว์เซอร์
         base_headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-                          '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
             'Accept': 'application/json, text/plain, */*',
             'Accept-Language': 'en-US,en;q=0.9',
         }
 
-        # 2. เข้าหน้าเว็บหลักเพื่อรับ Session และ Cookies
-        print(f"Visiting {BASE_URL} to get session cookies...")
+        # 2. เข้าหน้าเว็บหลักเพื่อรับ Session, Cookies และ CSRF meta tag
+        print(f"Visiting {BASE_URL} to get session cookies and CSRF token...")
         main_page_response = session.get(BASE_URL, headers=base_headers, timeout=30)
         main_page_response.raise_for_status()
 
-        # 3. อ่านค่า XSRF token จากคุกกี้ (ลองทั้งสองชื่อ)
-        xsrf_cookie = (
-            session.cookies.get('XSRF-TOKEN')
-            or session.cookies.get('X-XSRF-TOKEN')
-        )
-        if not xsrf_cookie:
-            print("Fatal Error: Could not find XSRF token cookie. The site may have changed.")
-            return None
+        # 3. พยายามอ่าน CSRF token จาก meta tag ใน HTML
+        soup = BeautifulSoup(main_page_response.text, 'html.parser')
+        meta_tag = soup.find('meta', attrs={'name': 'csrf-token'})
+        if meta_tag and meta_tag.get('content'):
+            csrf_token = meta_tag['content']
+            print("Successfully retrieved CSRF token from HTML meta tag.")
+        else:
+            # fallback: อ่าน XSRF-TOKEN cookie
+            xsrf_cookie = (
+                session.cookies.get('XSRF-TOKEN')
+                or session.cookies.get('X-XSRF-TOKEN')
+            )
+            if not xsrf_cookie:
+                print("Fatal Error: Could not find CSRF token (meta or cookie). The site may have changed.")
+                return None
+            csrf_token = urllib.parse.unquote(xsrf_cookie)
+            print("Successfully retrieved CSRF token from cookie.")
 
-        csrf_token = urllib.parse.unquote(xsrf_cookie)
-        print("Successfully retrieved XSRF token from cookie.")
-
-        # 4. สร้าง Header สำหรับยิง API (ใช้ X-XSRF-TOKEN)
+        # 4. สร้าง Header สำหรับเรียก API
         api_headers = {
             **base_headers,
-            'X-XSRF-TOKEN': csrf_token,
             'X-Requested-With': 'XMLHttpRequest',
             'Referer': BASE_URL,
+            'X-CSRF-TOKEN': csrf_token,
         }
 
         print(f"Calling API at {API_URL}...")

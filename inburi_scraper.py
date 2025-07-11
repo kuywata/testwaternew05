@@ -3,8 +3,6 @@ import os
 import json
 from datetime import datetime
 import pytz
-
-# เราจะกลับมาใช้ Selenium อีกครั้ง
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
@@ -17,7 +15,7 @@ TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 
 # --- การตั้งค่าสำหรับสคริปต์นี้โดยเฉพาะ ---
 BASE_URL = "https://singburi.thaiwater.net/wl"
-API_PATH = "/api/v1/tele_waterlevel" # ใช้แค่ Path ก็พอ
+API_PATH = "/api/v1/tele_waterlevel"
 LAST_DATA_FILE = 'last_inburi_data.txt'
 STATION_ID_TO_FIND = "C.35"
 NOTIFICATION_THRESHOLD_METERS = 0.20
@@ -25,7 +23,7 @@ NOTIFICATION_THRESHOLD_METERS = 0.20
 def get_inburi_river_data():
     """
     วิธีไฮบริด (สมบูรณ์ที่สุด):
-    1. ใช้ Selenium เปิดหน้าเว็บหลัก เพื่อให้ได้สภาพแวดล้อม (คุกกี้, session) ที่สมบูรณ์
+    1. ใช้ Selenium เปิดหน้าเว็บหลัก เพื่อให้ได้สภาพแวดล้อมที่สมบูรณ์
     2. สั่งให้ Selenium รัน JavaScript เพื่อยิง `fetch` ไปยัง API เองจากในเบราว์เซอร์
     3. รับข้อมูล JSON ที่ได้กลับมาใน Python แล้วประมวลผลต่อ
     """
@@ -43,12 +41,9 @@ def get_inburi_river_data():
         service = ChromeService(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
         
-        # 1. เข้าหน้าเว็บหลักเพื่อให้ browser สร้าง session และ cookies ที่ถูกต้อง
         print(f"Loading base page at {BASE_URL} to establish a valid browser context...")
         driver.get(BASE_URL)
         
-        # 2. สร้าง JavaScript ที่จะใช้ยิง API
-        #    วิธีนี้จะใช้ context ของเบราว์เซอร์ที่เปิดอยู่ ทำให้เหมือนการเรียก API ของหน้าเว็บจริงๆ
         js_to_execute = f"""
             return new Promise((resolve, reject) => {{
                 fetch('{API_PATH}')
@@ -74,7 +69,6 @@ def get_inburi_river_data():
             print("Error: JavaScript fetch command did not return any data.")
             return None
         
-        # 3. ประมวลผล JSON ที่ได้มา
         print("Successfully received API data. Processing...")
         target_station_data = next((s for s in all_stations_data if s.get('id') == STATION_ID_TO_FIND), None)
 
@@ -103,8 +97,6 @@ def get_inburi_river_data():
             print("Closing WebDriver.")
             driver.quit()
 
-
-# ฟังก์ชันที่เหลือทั้งหมด (send_line_message, read_last_data, write_data, main) ให้ใช้ของเดิม ไม่ต้องแก้ไข
 def send_line_message(data, change_amount):
     now_thailand = datetime.now(TIMEZONE_THAILAND)
     formatted_datetime = now_thailand.strftime("%d/%m/%Y %H:%M น.")

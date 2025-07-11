@@ -8,7 +8,6 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import time
 
 # Constants
 BASE_URL = "https://singburi.thaiwater.net/wl"
@@ -23,7 +22,8 @@ def get_inburi_river_data():
     print("Attempting direct API call with comprehensive headers...")
     session = requests.Session()
     base_headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                      '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
         'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'en-US,en;q=0.9',
     }
@@ -38,7 +38,6 @@ def get_inburi_river_data():
             csrf_token = meta['content']
             print("CSRF token from meta tag.")
         else:
-            # fallback cookie
             xsrf = session.cookies.get('XSRF-TOKEN') or session.cookies.get('X-XSRF-TOKEN')
             if not xsrf:
                 raise ValueError("Cannot find CSRF token.")
@@ -52,22 +51,19 @@ def get_inburi_river_data():
             'X-CSRF-TOKEN': csrf_token,
         }
         api_resp = session.get(API_URL, headers=api_headers, timeout=30)
-        if api_resp.status_code == 200:
-            try:
-                data = api_resp.json()
-                # ค้นหา station
-                for s in data:
-                    if s.get('id') == STATION_ID_TO_FIND:
-                        lvl = float(s.get('level', 0))
-                        bank = float(s.get('bank', 0))
-                        return {
-                            'station': f"ต.{s.get('tumbon')} อ.{s.get('amphoe')}",
-                            'water_level': lvl,
-                            'bank_level': bank,
-                            'overflow': lvl - bank
-                        }
-            except json.JSONDecodeError:
-                pass
+        api_resp.raise_for_status()
+        data = api_resp.json()
+        # ค้นหา station ใน JSON
+        for s in data:
+            if s.get('id') == STATION_ID_TO_FIND:
+                lvl = float(s.get('level', 0))
+                bank = float(s.get('bank', 0))
+                return {
+                    'station': f"ต.{s.get('tumbon')} อ.{s.get('amphoe')}",
+                    'water_level': lvl,
+                    'bank_level': bank,
+                    'overflow': lvl - bank
+                }
     except Exception as e:
         print(f"API call failed: {e}")
 
@@ -78,31 +74,31 @@ def get_inburi_river_data():
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     try:
         driver.get(BASE_URL)
-        # รอให้ตารางโหลด
+        # รอให้ตารางข้อมูลโหลด
         WebDriverWait(driver, 30).until(
-            EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'table tbody tr'))
+            EC.presence_of_element_located((By.CSS_SELECTOR, 'table tbody tr'))
         )
-        # ค้นหา row โดยใช้รหัสสถานี
-        row = None
         rows = driver.find_elements(By.CSS_SELECTOR, 'table tbody tr')
+        target_cells = None
         for r in rows:
             cells = r.find_elements(By.TAG_NAME, 'td')
-            if cells and cells[0].text.strip() == str(STATION_ID_TO_FIND):
-                row = cells
+            if any(cell.text.strip() == str(STATION_ID_TO_FIND) for cell in cells):
+                target_cells = cells
                 break
-        if not row:
+        if not target_cells:
             print(f"Station {STATION_ID_TO_FIND} not found via Selenium.")
             return None
-        # สมมติ columns: 0=id,1=province,2=amphoe,3=tumbon,4=level,5=bank
-        tumbon = row[3].text
-        amphoe = row[2].text
-        lvl = float(row[4].text)
-        bank = float(row[5].text)
+        # สมมติโครงสร้างคอลัมน์: id, province, amphoe, tumbon, level, bank, ...
+        tumbon = target_cells[3].text.strip()
+        amphoe = target_cells[2].text.strip()
+        # ดึงค่าระดับน้ำและตลิ่งจากคอลัมน์ก่อนสุดท้ายและสุดท้ายลบหนึ่ง
+        level = float(target_cells[-3].text.strip())
+        bank = float(target_cells[-2].text.strip())
         return {
             'station': f"ต.{tumbon} อ.{amphoe}",
-            'water_level': lvl,
+            'water_level': level,
             'bank_level': bank,
-            'overflow': lvl - bank
+            'overflow': level - bank
         }
     finally:
         driver.quit()

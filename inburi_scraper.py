@@ -2,114 +2,118 @@ import requests
 import json
 import urllib.parse
 from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import time
 
 # Constants
 BASE_URL = "https://singburi.thaiwater.net/wl"
-# เพิ่ม slash ท้าย API URL เพื่อให้แน่ใจว่าเรียก endpoint ถูกต้อง
-API_URL = "https://singburi.thaiwater.net/api/v1/tele_waterlevel/"
+API_URL = "https://singburi.thaiwater.net/api/v1/tele_waterlevel"
 STATION_ID_TO_FIND = 3724  # รหัสสถานีที่ต้องการค้นหา
 
 
 def get_inburi_river_data():
     """
-    ดึงข้อมูลโดยการเรียก API ของเว็บโดยตรง โดยใช้ Header และ CSRF token ที่ถูกต้อง
+    พยายามเรียก API ก่อน หากล้มเหลวจะใช้ Selenium สกรัปปิ้งหน้าเว็บโดยตรง
     """
     print("Attempting direct API call with comprehensive headers...")
+    session = requests.Session()
+    base_headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
     try:
-        session = requests.Session()
-
-        # 1. สร้าง Header พื้นฐานเพื่อเลียนแบบเบราว์เซอร์
-        base_headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'en-US,en;q=0.9',
-        }
-
-        # 2. เข้าหน้าเว็บหลักเพื่อรับ Session, Cookies และ CSRF meta tag
-        print(f"Visiting {BASE_URL} to get session cookies and CSRF token...")
-        main_page_response = session.get(BASE_URL, headers=base_headers, timeout=30)
-        main_page_response.raise_for_status()
-
-        # 3. พยายามอ่าน CSRF token จาก meta tag ใน HTML
-        soup = BeautifulSoup(main_page_response.text, 'html.parser')
-        meta_tag = soup.find('meta', attrs={'name': 'csrf-token'})
-        if meta_tag and meta_tag.get('content'):
-            csrf_token = meta_tag['content']
-            print("Successfully retrieved CSRF token from HTML meta tag.")
+        # GET หน้าเว็บหลัก เพื่อรับ Cookies และ CSRF token
+        main_resp = session.get(BASE_URL, headers=base_headers, timeout=30)
+        main_resp.raise_for_status()
+        # อ่าน CSRF จาก meta tag
+        soup = BeautifulSoup(main_resp.text, 'html.parser')
+        meta = soup.find('meta', {'name': 'csrf-token'})
+        if meta and meta.get('content'):
+            csrf_token = meta['content']
+            print("CSRF token from meta tag.")
         else:
-            # fallback: อ่าน XSRF-TOKEN cookie
-            xsrf_cookie = (
-                session.cookies.get('XSRF-TOKEN')
-                or session.cookies.get('X-XSRF-TOKEN')
-            )
-            if not xsrf_cookie:
-                print("Fatal Error: Could not find CSRF token (meta or cookie). The site may have changed.")
-                return None
-            csrf_token = urllib.parse.unquote(xsrf_cookie)
-            print("Successfully retrieved CSRF token from cookie.")
+            # fallback cookie
+            xsrf = session.cookies.get('XSRF-TOKEN') or session.cookies.get('X-XSRF-TOKEN')
+            if not xsrf:
+                raise ValueError("Cannot find CSRF token.")
+            csrf_token = urllib.parse.unquote(xsrf)
+            print("CSRF token from cookie.")
 
-        # 4. สร้าง Header สำหรับเรียก API
         api_headers = {
             **base_headers,
             'X-Requested-With': 'XMLHttpRequest',
             'Referer': BASE_URL,
             'X-CSRF-TOKEN': csrf_token,
         }
-
-        print(f"Calling API at {API_URL}...")
-        api_response = session.get(API_URL, headers=api_headers, timeout=30)
-
-        if api_response.status_code != 200:
-            print(f"Unexpected status code: {api_response.status_code}")
-            print(f"Response text (first 500 chars): {api_response.text[:500]}")
-            return None
-
-        # 5. แปลงข้อมูล JSON (จับ error อย่างชัดเจน)
-        try:
-            all_stations_data = api_response.json()
-        except json.JSONDecodeError as e:
-            print("JSON Decode Error: Failed to parse API response:", e)
-            print(f"Response text (first 500 chars): {api_response.text[:500]}")
-            return None
-
-        # 6. หา Station ที่ต้องการ
-        target = next((s for s in all_stations_data if s.get('id') == STATION_ID_TO_FIND), None)
-        if not target:
-            print(f"Could not find station {STATION_ID_TO_FIND} in the API response.")
-            return None
-
-        station_name = f"ต.{target.get('tumbon')} อ.{target.get('amphoe')}"
-        water_level = float(target.get('level', 0))
-        bank_level = float(target.get('bank', 0))
-        overflow = water_level - bank_level
-
-        print(f"✅ Data for station: {station_name} (ID: {STATION_ID_TO_FIND})")
-        print(f"  - Water Level: {water_level:.2f} m, Bank Level: {bank_level:.2f} m.")
-        return {
-            "station": station_name,
-            "water_level": water_level,
-            "bank_level": bank_level,
-            "overflow": overflow
-        }
-
-    except requests.exceptions.RequestException as e:
-        print(f"An HTTP error occurred: {e}")
-        if hasattr(e, 'response') and e.response is not None:
-            print(f"Status Code: {e.response.status_code}")
-            print(f"Response Body: {e.response.text[:500]}")
-        return None
+        api_resp = session.get(API_URL, headers=api_headers, timeout=30)
+        if api_resp.status_code == 200:
+            try:
+                data = api_resp.json()
+                # ค้นหา station
+                for s in data:
+                    if s.get('id') == STATION_ID_TO_FIND:
+                        lvl = float(s.get('level', 0))
+                        bank = float(s.get('bank', 0))
+                        return {
+                            'station': f"ต.{s.get('tumbon')} อ.{s.get('amphoe')}",
+                            'water_level': lvl,
+                            'bank_level': bank,
+                            'overflow': lvl - bank
+                        }
+            except json.JSONDecodeError:
+                pass
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        return None
+        print(f"API call failed: {e}")
+
+    # Fallback: Selenium scraping
+    print("Falling back to Selenium scraping...")
+    options = webdriver.ChromeOptions()
+    options.add_argument('--headless=new')
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    try:
+        driver.get(BASE_URL)
+        # รอให้ตารางโหลด
+        WebDriverWait(driver, 30).until(
+            EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'table tbody tr'))
+        )
+        # ค้นหา row โดยใช้รหัสสถานี
+        row = None
+        rows = driver.find_elements(By.CSS_SELECTOR, 'table tbody tr')
+        for r in rows:
+            cells = r.find_elements(By.TAG_NAME, 'td')
+            if cells and cells[0].text.strip() == str(STATION_ID_TO_FIND):
+                row = cells
+                break
+        if not row:
+            print(f"Station {STATION_ID_TO_FIND} not found via Selenium.")
+            return None
+        # สมมติ columns: 0=id,1=province,2=amphoe,3=tumbon,4=level,5=bank
+        tumbon = row[3].text
+        amphoe = row[2].text
+        lvl = float(row[4].text)
+        bank = float(row[5].text)
+        return {
+            'station': f"ต.{tumbon} อ.{amphoe}",
+            'water_level': lvl,
+            'bank_level': bank,
+            'overflow': lvl - bank
+        }
+    finally:
+        driver.quit()
 
 
 def main():
     data = get_inburi_river_data()
     if data:
-        # บันทึกข้อมูลลงไฟล์
-        with open("last_inburi_data.txt", "w", encoding="utf-8") as f:
+        with open('last_inburi_data.txt', 'w', encoding='utf-8') as f:
             f.write(json.dumps(data, ensure_ascii=False))
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

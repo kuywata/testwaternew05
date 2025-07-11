@@ -4,8 +4,6 @@ import json
 from datetime import datetime
 import pytz
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service as ChromeService
-from webdriver_manager.chrome import ChromeDriverManager
 from selenium.common.exceptions import WebDriverException
 
 # --- การตั้งค่าทั่วไป ---
@@ -38,8 +36,9 @@ def get_inburi_river_data():
     
     driver = None 
     try:
-        service = ChromeService(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=options)
+        # ไม่ต้องใช้ webdriver-manager เพราะ Workflow ติดตั้งให้แล้ว
+        driver = webdriver.Chrome(options=options)
+        driver.set_page_load_timeout(180) # เพิ่มเวลารอโหลดหน้าเว็บเป็น 3 นาที
         
         print(f"Loading base page at {BASE_URL} to establish a valid browser context...")
         driver.get(BASE_URL)

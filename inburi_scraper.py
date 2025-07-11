@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 import pytz
 from bs4 import BeautifulSoup
+import urllib.parse
 
 # --- การตั้งค่าทั่วไป ---
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
@@ -19,33 +20,32 @@ NOTIFICATION_THRESHOLD_METERS = 0.20
 
 def get_inburi_river_data():
     """
-    ดึงข้อมูลโดยการเรียก API ของเว็บโดยตรง (วิธีที่เสถียรที่สุด)
-    ขั้นตอน:
-    1. สร้าง Session เพื่อจัดการคุกกี้อัตโนมัติ
-    2. เข้าหน้าเว็บหลัก (BASE_URL) เพื่อรับ CSRF Token จาก meta tag
-    3. นำ Token ที่ได้ไปใช้เป็น Header ในการเรียก API_URL
+    ดึงข้อมูลโดยการเรียก API ของเว็บโดยตรง
+    วิธีที่สมบูรณ์: อ่าน CSRF Token จากคุกกี้ 'XSRF-TOKEN' โดยตรง
     """
     print("Fetching data via direct API call...")
     try:
         session = requests.Session()
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+            'Accept': 'application/json' # บอกว่าเรารับ JSON ได้
         }
         
-        print(f"Visiting {BASE_URL} to get CSRF token...")
-        main_page_response = session.get(BASE_URL, headers=headers, timeout=20)
-        main_page_response.raise_for_status()
+        # 1. เข้าหน้าเว็บหลักเพื่อรับ Session และ Cookies
+        print(f"Visiting {BASE_URL} to get session cookies...")
+        session.get(BASE_URL, headers=headers, timeout=20).raise_for_status()
         
-        soup = BeautifulSoup(main_page_response.text, 'html.parser')
-        token_tag = soup.find('meta', {'name': 'csrf-token'})
-        
-        if not token_tag or not token_tag.get('content'):
-            print("Error: Could not find CSRF token on the main page.")
+        # 2. อ่านค่า XSRF-TOKEN จากคุกกี้ที่เซิร์ฟเวอร์ส่งมาให้
+        xsrf_cookie = session.cookies.get('XSRF-TOKEN')
+        if not xsrf_cookie:
+            print("Error: Could not find 'XSRF-TOKEN' cookie after visiting the main page.")
             return None
-            
-        csrf_token = token_tag.get('content')
-        print(f"Successfully retrieved CSRF token.")
+        
+        # Token ในคุกกี้มักจะถูก encoded เราต้อง decode ก่อนใช้
+        csrf_token = urllib.parse.unquote(xsrf_cookie)
+        print(f"Successfully retrieved CSRF token from cookie.")
 
+        # 3. เตรียม Header สำหรับยิง API
         api_headers = headers.copy()
         api_headers.update({
             'X-CSRF-TOKEN': csrf_token,
@@ -56,13 +56,10 @@ def get_inburi_river_data():
         print(f"Calling API at {API_URL}...")
         api_response = session.get(API_URL, headers=api_headers, timeout=20)
         
-        print(f"API response status code: {api_response.status_code}")
-        if not api_response.text.strip():
-            print("Error: API returned an empty response body.")
-            return None
-        
+        # เช็ค Status code ก่อน
         api_response.raise_for_status()
 
+        # 4. แปลงข้อมูล JSON
         all_stations_data = api_response.json()
         target_station_data = next((s for s in all_stations_data if s.get('id') == STATION_ID_TO_FIND), None)
 
@@ -75,15 +72,15 @@ def get_inburi_river_data():
         bank_level = float(target_station_data.get('bank', 0))
         overflow = water_level - bank_level
         
-        print(f"Successfully found data for station: {station_name} (ID: {STATION_ID_TO_FIND})")
+        print(f"✅ Successfully found data for station: {station_name} (ID: {STATION_ID_TO_FIND})")
         print(f"  - Water Level: {water_level:.2f} m, Bank Level: {bank_level:.2f} m.")
 
         return {"station": station_name, "water_level": water_level, "bank_level": bank_level, "overflow": overflow}
 
-    except requests.exceptions.RequestException as e:
-        print(f"An error occurred during the request: {e}")
-        # เพิ่มการแสดงผลข้อความจาก response ถ้ามี
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP Error occurred: {e}")
         if e.response is not None:
+            print(f"Status Code: {e.response.status_code}")
             print(f"Response Body: {e.response.text[:500]}")
         return None
     except json.JSONDecodeError as e:
@@ -95,7 +92,6 @@ def get_inburi_river_data():
         return None
 
 def send_line_message(data, change_amount):
-    """ส่งข้อความไปยัง LINE พร้อมระบุการเปลี่ยนแปลง"""
     now_thailand = datetime.now(TIMEZONE_THAILAND)
     formatted_datetime = now_thailand.strftime("%d/%m/%Y %H:%M น.")
     
@@ -114,7 +110,6 @@ def send_line_message(data, change_amount):
     else:
         status_text, status_icon, overflow_text = "✅ *ระดับน้ำปกติ*", "🌊", f"ต่ำกว่าตลิ่ง {-data['overflow']:.2f} ม."
 
-    # ----- จุดที่แก้ไข: เพิ่มวงเล็บปิดท้าย -----
     message = (
         f"{status_icon} *แจ้งเตือนระดับน้ำแม่น้ำเจ้าพระยา*\n"
         f"📍 *พื้นที่: สถานีอินทร์บุรี ({data['station']})*\n"
@@ -127,7 +122,6 @@ def send_line_message(data, change_amount):
         f"({overflow_text})\n\n"
         f"🗓️ {formatted_datetime}"
     )
-    # ----------------------------------------
 
     url = 'https://api.line.me/v2/bot/message/push'
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'}
@@ -170,7 +164,7 @@ def main():
     if last_level is None:
         print("No last data found. Sending initial notification.")
         should_notify = True
-        change_diff = 0.0 # กำหนดให้ change_amount เป็น 0 สำหรับการแจ้งเตือนครั้งแรก
+        change_diff = 0.0
     else:
         change_diff = current_level - last_level
         if abs(change_diff) >= NOTIFICATION_THRESHOLD_METERS:

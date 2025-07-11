@@ -18,10 +18,8 @@ STATION_ID_TO_FIND = 3724  # รหัสสถานีที่ต้องก
 
 def get_inburi_river_data():
     """
-    พยายามเรียก API ก่อน หากล้มเหลวจะใช้ Selenium ในการ fetch JSON ในบริบทเบราว์เซอร์
-    และถ้ายังไม่ได้ผล จึงสกรัปปิ้ง HTML ตาราง
+    ดึงข้อมูลน้ำจาก API และ fallback หลายชั้น
     """
-    print("Attempting API call via requests...")
     session = requests.Session()
     base_headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -29,25 +27,20 @@ def get_inburi_river_data():
         'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'en-US,en;q=0.9',
     }
+    # 1. API via requests
     try:
-        # ดึง CSRF token
         resp = session.get(BASE_URL, headers=base_headers, timeout=30)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, 'html.parser')
         meta = soup.find('meta', {'name': 'csrf-token'})
-        if meta and meta.get('content'):
-            csrf_token = meta['content']
-        else:
-            xsrf = session.cookies.get('XSRF-TOKEN') or session.cookies.get('X-XSRF-TOKEN')
-            csrf_token = urllib.parse.unquote(xsrf) if xsrf else ''
-
+        csrf_token = meta['content'] if meta else ''
         headers = {
             **base_headers,
             'X-Requested-With': 'XMLHttpRequest',
             'Referer': BASE_URL,
             'X-CSRF-TOKEN': csrf_token,
         }
-        api_resp = session.get(FULL_API_URL + API_URL, headers=headers, timeout=30)
+        api_resp = session.get(FULL_API_URL, headers=headers, timeout=30)
         api_resp.raise_for_status()
         data = api_resp.json()
         for s in data:
@@ -61,26 +54,24 @@ def get_inburi_river_data():
                     'overflow': lvl - bank
                 }
     except Exception as e:
-        print(f"Requests API call failed: {e}")
+        print(f"API (requests) failed: {e}")
 
-    # Fallback 1: Selenium fetch JSON inside browser
-    print("Falling back: using Selenium to fetch JSON via browser...")
-    options = webdriver.ChromeOptions()
-    options.add_argument('--headless=new')
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    # 2. Selenium fetch JSON via browser
     try:
+        print("Fallback: Selenium fetching JSON...")
+        options = webdriver.ChromeOptions()
+        options.add_argument('--headless=new')
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
         driver.get(BASE_URL)
-        WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located((By.TAG_NAME, 'body'))
+        WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+        script = (
+            "const callback = arguments[0];"
+            f"fetch('{API_URL}', {{credentials:'same-origin'}})"
+            ".then(r=>r.json()).then(json=>callback(json))"
+            ".catch(e=>callback({{'error':e.toString()}}));"
         )
-        script = f"""
-            var callback = arguments[0];
-            fetch('{API_URL}', {{ credentials: 'same-origin' }})
-              .then(r => r.json())
-              .then(json => callback(json))
-              .catch(err => callback({{'error': err.toString()}}));
-        """
         data = driver.execute_async_script(script)
+        driver.quit()
         if isinstance(data, list):
             for s in data:
                 if s.get('id') == STATION_ID_TO_FIND:
@@ -94,35 +85,59 @@ def get_inburi_river_data():
                     }
     except Exception as e:
         print(f"Selenium JSON fetch failed: {e}")
-    finally:
-        driver.quit()
 
-    # Fallback 2: Selenium HTML table scraping
-    print("Final fallback: scraping HTML table...")
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    # 3. BeautifulSoup table parse
     try:
+        print("Fallback: parsing HTML table via BeautifulSoup...")
+        resp = session.get(BASE_URL, headers=base_headers, timeout=30)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        table = soup.find('table')
+        if table:
+            headers = [th.text.strip() for th in table.find('thead').find_all('th')]
+            idx_id = next(i for i,h in enumerate(headers) if 'สถานี' in h)
+            idx_am = next(i for i,h in enumerate(headers) if 'อำเภอ' in h)
+            idx_tb = next(i for i,h in enumerate(headers) if 'ตำบล' in h)
+            idx_lvl = next(i for i,h in enumerate(headers) if 'ระดับน้ำ' in h)
+            idx_bank = next(i for i,h in enumerate(headers) if 'ตลิ่ง' in h)
+            for tr in table.find('tbody').find_all('tr'):
+                cols = [td.text.strip() for td in tr.find_all('td')]
+                if cols[idx_id] == str(STATION_ID_TO_FIND):
+                    lvl = float(cols[idx_lvl])
+                    bank = float(cols[idx_bank])
+                    return {
+                        'station': f"ต.{cols[idx_tb]} อ.{cols[idx_am]}",
+                        'water_level': lvl,
+                        'bank_level': bank,
+                        'overflow': lvl - bank
+                    }
+    except Exception as e:
+        print(f"BeautifulSoup table parse failed: {e}")
+
+    # 4. Selenium HTML scrape fallback
+    try:
+        print("Final fallback: Selenium HTML scraping...")
+        options = webdriver.ChromeOptions()
+        options.add_argument('--headless=new')
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
         driver.get(BASE_URL)
-        WebDriverWait(driver, 30).until(
-            EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'table tbody tr'))
-        )
+        WebDriverWait(driver, 15).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'table tbody tr')))
         rows = driver.find_elements(By.CSS_SELECTOR, 'table tbody tr')
         for r in rows:
             cells = r.find_elements(By.TAG_NAME, 'td')
-            if any(cell.text.strip() == str(STATION_ID_TO_FIND) for cell in cells):
-                tumbon = cells[3].text.strip()
-                amphoe = cells[2].text.strip()
-                level = float(cells[-3].text.strip())
-                bank = float(cells[-2].text.strip())
+            if cells and cells[0].text.strip() == str(STATION_ID_TO_FIND):
                 return {
-                    'station': f"ต.{tumbon} อ.{amphoe}",
-                    'water_level': level,
-                    'bank_level': bank,
-                    'overflow': level - bank
+                    'station': f"ต.{cells[3].text.strip()} อ.{cells[2].text.strip()}",
+                    'water_level': float(cells[-3].text.strip()),
+                    'bank_level': float(cells[-2].text.strip()),
+                    'overflow': float(cells[-3].text.strip()) - float(cells[-2].text.strip())
                 }
-        print(f"Station {STATION_ID_TO_FIND} not found in table.")
-        return None
-    finally:
         driver.quit()
+    except Exception as e:
+        print(f"Selenium HTML scraping failed: {e}")
+
+    print("All methods failed: station not found.")
+    return None
 
 
 def main():

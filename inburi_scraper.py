@@ -32,18 +32,19 @@ def get_inburi_river_data():
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--window-size=1920,1080') # กำหนดขนาดหน้าจอเผื่อบางเว็บเช็ค
+    options.add_argument('--window-size=1920,1080')
     
-    driver = None # กำหนดค่าเริ่มต้น
+    driver = None 
     try:
         service = ChromeService(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
         
         print(f"Navigating to {STATION_URL}...")
         driver.get(STATION_URL)
-        print(f"Page title is: '{driver.title}'") # เพิ่ม Log เพื่อดู Title ของหน้าเว็บ
+        print(f"Page title is: '{driver.title}'")
 
         print("Waiting for JavaScript variable 'tele_data_wl' to be available...")
+        # รอจนกว่าตัวแปร tele_data_wl จะถูกสร้างขึ้นและมีข้อมูล (ไม่ใช่ array ว่าง)
         WebDriverWait(driver, 30).until(
             lambda d: d.execute_script("return typeof tele_data_wl !== 'undefined' && tele_data_wl.length > 0;")
         )
@@ -87,7 +88,7 @@ def get_inburi_river_data():
         print("Error: Timed out waiting for page/JavaScript to load.")
         if driver:
             print("Page source at the time of timeout:")
-            print(driver.page_source[:2000]) # แสดงโค้ด HTML 2000 ตัวอักษรแรกเพื่อตรวจสอบ
+            print(driver.page_source[:2000]) 
         return None
     except Exception as e:
         print(f"An unexpected error occurred during Selenium process: {e}")
@@ -97,17 +98,16 @@ def get_inburi_river_data():
             print("Closing WebDriver.")
             driver.quit()
 
-# ฟังก์ชันที่เหลือ (send_line_message, read_last_data, write_data, main) ใช้ของเดิมได้เลย
-# (เนื้อหาฟังก์ชันส่วนที่เหลือเหมือนเดิม)
 def send_line_message(data, change_amount):
-    """ส่งข้อความไปยัง LINE พร้อมระบุการเปลี่ยนแปลง"""
     now_thailand = datetime.now(TIMEZONE_THAILAND)
     formatted_datetime = now_thailand.strftime("%d/%m/%Y %H:%M น.")
     
-    if change_amount == 0.0 and last_level is not None:
-         change_text = f"เปลี่ยนแปลง 0.00 ม."
-    elif last_level is None:
+    last_level = read_last_data(LAST_DATA_FILE)
+
+    if last_level is None:
         change_text = "รายงานข้อมูลครั้งแรก"
+    elif change_amount == 0.0:
+        change_text = "ระดับน้ำไม่เปลี่ยนแปลง"
     else:
         change_direction_icon = "⬆️" if change_amount > 0 else "⬇️"
         change_text = f"เปลี่ยนแปลง {change_direction_icon} {abs(change_amount):.2f} ม."
@@ -140,7 +140,6 @@ def send_line_message(data, change_amount):
     except requests.exceptions.RequestException as e:
         print(f"Error sending LINE message: {e.response.text if e.response else 'No response'}")
 
-
 def read_last_data(file_path):
     if os.path.exists(file_path):
         with open(file_path, 'r') as f:
@@ -150,22 +149,19 @@ def read_last_data(file_path):
                 return None
     return None
 
-
 def write_data(file_path, data):
     with open(file_path, 'w') as f:
         f.write(str(data))
 
-# main function needs to be defined to use 'last_level' variable
-last_level = read_last_data(LAST_DATA_FILE)
-
 def main():
-    global last_level
     current_data_dict = get_inburi_river_data()
     if current_data_dict is None:
         print("Could not retrieve current data. Exiting.")
         return
 
     current_level = current_data_dict['water_level']
+    last_level = read_last_data(LAST_DATA_FILE)
+
     print(f"Current water level: {current_level:.2f} m.")
     print(f"Last recorded level: {last_level if last_level is not None else 'N/A'}")
 
@@ -177,12 +173,8 @@ def main():
         should_notify = True
     else:
         change_diff = current_level - last_level
-        # แจ้งเตือนเมื่อค่าต่างจากเดิม >= threshold หรือเมื่อค่าระดับน้ำเท่าเดิม
-        if abs(change_diff) >= NOTIFICATION_THRESHOLD_METERS or current_level == last_level:
-            if current_level == last_level:
-                print(f"Water level is unchanged at {current_level:.2f}m. Sending notification as per logic.")
-            else:
-                print(f"Change of {abs(change_diff):.2f}m detected, which meets or exceeds the threshold of {NOTIFICATION_THRESHOLD_METERS}m.")
+        if abs(change_diff) >= NOTIFICATION_THRESHOLD_METERS:
+            print(f"Change of {abs(change_diff):.2f}m detected, which meets or exceeds the threshold.")
             should_notify = True
         else:
             print(f"Change of {abs(change_diff):.2f}m is less than the threshold. No notification needed.")

@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import os
 from datetime import datetime
 import pytz
+import time # กลับมาใช้ time
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
@@ -26,9 +27,9 @@ NOTIFICATION_THRESHOLD_METERS = 0.20
 
 def get_inburi_river_data():
     """ดึงข้อมูลระดับน้ำโดยใช้ Selenium เพื่อรอ JavaScript โหลดข้อมูล"""
-    print("Setting up Selenium Chrome driver with Eager Page Load Strategy...")
+    print("Setting up Selenium Chrome driver with Final Strategy...")
     options = webdriver.ChromeOptions()
-    options.page_load_strategy = 'eager'
+    # options.page_load_strategy = 'eager' # เอากลยุทธ์นี้ออก
     
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
@@ -41,11 +42,18 @@ def get_inburi_river_data():
     service = ChromeService(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
     
+    # 🎯 กำหนดเวลาโหลดหน้าเว็บที่นานขึ้น
+    driver.set_page_load_timeout(90)
+
     try:
-        print(f"Fetching data from {STATION_URL} with Eager strategy...")
+        print(f"Fetching data from {STATION_URL} with normal strategy...")
         driver.get(STATION_URL)
         
-        print("Page is interactive. Now waiting for the specific data table...")
+        # 🎯 เพิ่มการ 'พักหายใจ' 3 วินาที เพื่อหลอกระบบป้องกัน
+        print("Page loaded. Pausing for 3 seconds before interaction...")
+        time.sleep(3)
+
+        print("Now waiting for the specific data table...")
         wait = WebDriverWait(driver, 30) 
         wait.until(EC.presence_of_element_located((By.ID, 'tele_wl')))
         
@@ -103,7 +111,6 @@ def send_line_message(data, change_amount):
     change_direction_icon = "⬆️" if change_amount > 0 else "⬇️"
     change_text = f"เปลี่ยนแปลง {change_direction_icon} {abs(change_amount):.2f} ม."
     
-    # --- 🎯 นี่คือบรรทัดที่ถูกต้อง ---
     if data['overflow'] > 0:
         status_text, status_icon, overflow_text = "⚠️ *น้ำล้นตลิ่ง*", "🚨", f"{data['overflow']:.2f} ม."
     else:

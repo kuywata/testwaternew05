@@ -7,9 +7,8 @@ from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 
 # --- การตั้งค่าทั่วไป ---
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
@@ -27,30 +26,30 @@ def get_inburi_river_data():
     ดึงข้อมูลโดยใช้ Selenium เพื่อรอให้ JavaScript ของเว็บทำงานเสร็จก่อน
     จากนั้นจึงดึงข้อมูล JSON ที่ซ่อนอยู่ใน <script>
     """
-    print("Fetching data using Selenium to render JavaScript...")
+    print("Initializing Selenium WebDriver...")
     
-    # ตั้งค่า Chrome ให้ทำงานแบบไม่มีหน้าจอ (Headless)
     options = webdriver.ChromeOptions()
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--window-size=1920,1080') # กำหนดขนาดหน้าจอเผื่อบางเว็บเช็ค
     
+    driver = None # กำหนดค่าเริ่มต้น
     try:
-        # ติดตั้งและจัดการ ChromeDriver อัตโนมัติ
         service = ChromeService(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
         
+        print(f"Navigating to {STATION_URL}...")
         driver.get(STATION_URL)
-        
-        # รอให้ JavaScript โหลดข้อมูล โดยรอจนกว่าจะเจอ script ที่มีตัวแปร 'tele_data_wl'
-        # หรือรอสูงสุด 30 วินาที
+        print(f"Page title is: '{driver.title}'") # เพิ่ม Log เพื่อดู Title ของหน้าเว็บ
+
+        print("Waiting for JavaScript variable 'tele_data_wl' to be available...")
         WebDriverWait(driver, 30).until(
-            lambda d: d.execute_script("return typeof tele_data_wl !== 'undefined';")
+            lambda d: d.execute_script("return typeof tele_data_wl !== 'undefined' && tele_data_wl.length > 0;")
         )
+        print("JavaScript variable found. Parsing data...")
         
-        # เมื่อแน่ใจว่าข้อมูลโหลดแล้ว จึงดึงโค้ดหน้าเว็บ (Page Source) ออกมา
         html_content = driver.page_source
-        
         soup = BeautifulSoup(html_content, 'html.parser')
         scripts = soup.find_all('script')
         
@@ -64,16 +63,11 @@ def get_inburi_river_data():
                 break
         
         if not json_data_string:
-            print("Could not find JavaScript variable 'tele_data_wl' in the page even after waiting.")
+            print("Could not find JavaScript variable 'tele_data_wl' in the page source.")
             return None
 
         all_stations_data = json.loads(json_data_string)
-        
-        target_station_data = None
-        for station in all_stations_data:
-            if station.get('id') == STATION_ID_TO_FIND:
-                target_station_data = station
-                break
+        target_station_data = next((s for s in all_stations_data if s.get('id') == STATION_ID_TO_FIND), None)
         
         if not target_station_data:
             print(f"Could not find station {STATION_ID_TO_FIND} in the parsed data.")
@@ -82,34 +76,37 @@ def get_inburi_river_data():
         station_name = f"ต.{target_station_data.get('tumbon')} อ.{target_station_data.get('amphoe')}"
         water_level = float(target_station_data.get('level', 0))
         bank_level = float(target_station_data.get('bank', 0))
-        
-        print(f"Found station: {station_name} (ID: {STATION_ID_TO_FIND})")
-        print(f"  - Water Level: {water_level:.2f} m.")
-        print(f"  - Bank Level: {bank_level:.2f} m.")
-        
         overflow = water_level - bank_level
+        
+        print(f"Successfully found data for station: {station_name} (ID: {STATION_ID_TO_FIND})")
+        print(f"  - Water Level: {water_level:.2f} m, Bank Level: {bank_level:.2f} m.")
 
-        return {
-            "station": station_name,
-            "water_level": water_level,
-            "bank_level": bank_level,
-            "overflow": overflow
-        }
+        return {"station": station_name, "water_level": water_level, "bank_level": bank_level, "overflow": overflow}
 
+    except TimeoutException:
+        print("Error: Timed out waiting for page/JavaScript to load.")
+        if driver:
+            print("Page source at the time of timeout:")
+            print(driver.page_source[:2000]) # แสดงโค้ด HTML 2000 ตัวอักษรแรกเพื่อตรวจสอบ
+        return None
     except Exception as e:
         print(f"An unexpected error occurred during Selenium process: {e}")
         return None
     finally:
-        if 'driver' in locals() and driver:
+        if driver:
+            print("Closing WebDriver.")
             driver.quit()
 
+# ฟังก์ชันที่เหลือ (send_line_message, read_last_data, write_data, main) ใช้ของเดิมได้เลย
+# (เนื้อหาฟังก์ชันส่วนที่เหลือเหมือนเดิม)
 def send_line_message(data, change_amount):
     """ส่งข้อความไปยัง LINE พร้อมระบุการเปลี่ยนแปลง"""
     now_thailand = datetime.now(TIMEZONE_THAILAND)
     formatted_datetime = now_thailand.strftime("%d/%m/%Y %H:%M น.")
     
-    # สำหรับการแจ้งเตือนครั้งแรก ไม่ต้องแสดงการเปลี่ยนแปลง
-    if change_amount == 0.0:
+    if change_amount == 0.0 and last_level is not None:
+         change_text = f"เปลี่ยนแปลง 0.00 ม."
+    elif last_level is None:
         change_text = "รายงานข้อมูลครั้งแรก"
     else:
         change_direction_icon = "⬆️" if change_amount > 0 else "⬇️"
@@ -158,16 +155,17 @@ def write_data(file_path, data):
     with open(file_path, 'w') as f:
         f.write(str(data))
 
+# main function needs to be defined to use 'last_level' variable
+last_level = read_last_data(LAST_DATA_FILE)
 
 def main():
+    global last_level
     current_data_dict = get_inburi_river_data()
     if current_data_dict is None:
         print("Could not retrieve current data. Exiting.")
         return
 
     current_level = current_data_dict['water_level']
-    last_level = read_last_data(LAST_DATA_FILE)
-
     print(f"Current water level: {current_level:.2f} m.")
     print(f"Last recorded level: {last_level if last_level is not None else 'N/A'}")
 
@@ -177,21 +175,24 @@ def main():
     if last_level is None:
         print("No last data found. Sending initial notification.")
         should_notify = True
-        change_diff = 0.0
     else:
         change_diff = current_level - last_level
-        if abs(change_diff) >= NOTIFICATION_THRESHOLD_METERS:
-            print(f"Change of {abs(change_diff):.2f}m detected, which meets or exceeds the threshold of {NOTIFICATION_THRESHOLD_METERS}m.")
+        # แจ้งเตือนเมื่อค่าต่างจากเดิม >= threshold หรือเมื่อค่าระดับน้ำเท่าเดิม
+        if abs(change_diff) >= NOTIFICATION_THRESHOLD_METERS or current_level == last_level:
+            if current_level == last_level:
+                print(f"Water level is unchanged at {current_level:.2f}m. Sending notification as per logic.")
+            else:
+                print(f"Change of {abs(change_diff):.2f}m detected, which meets or exceeds the threshold of {NOTIFICATION_THRESHOLD_METERS}m.")
             should_notify = True
         else:
             print(f"Change of {abs(change_diff):.2f}m is less than the threshold. No notification needed.")
     
     if should_notify:
         send_line_message(current_data_dict, change_diff)
-    
-    print(f"Saving current level ({current_level:.2f}) to {LAST_DATA_FILE}.")
-    write_data(LAST_DATA_FILE, current_level)
-
+        print(f"Saving current level ({current_level:.2f}) to {LAST_DATA_FILE}.")
+        write_data(LAST_DATA_FILE, current_level)
+    else:
+        print("No notification sent, not updating the last data file.")
 
 if __name__ == "__main__":
     main()

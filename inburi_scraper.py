@@ -3,6 +3,7 @@ import os
 import json
 from datetime import datetime
 import pytz
+from bs4 import BeautifulSoup
 
 # --- การตั้งค่าทั่วไป ---
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
@@ -10,46 +11,51 @@ LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
 TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 
 # --- การตั้งค่าสำหรับสคริปต์นี้โดยเฉพาะ ---
-API_URL = "https://singburi.thaiwater.net/api/get_wl"
+STATION_URL = "https://singburi.thaiwater.net/wl" # กลับมาใช้ URL ของหน้าเว็บหลัก
 LAST_DATA_FILE = 'last_inburi_data.txt'
 STATION_ID_TO_FIND = "C.35"
 NOTIFICATION_THRESHOLD_METERS = 0.20
 
 def get_inburi_river_data():
     """
-    ดึงข้อมูลระดับน้ำโดยตรงจาก API ของเว็บ พร้อมปลอม User-Agent
+    ดึงข้อมูลโดยการอ่านหน้า HTML แล้วสกัดเอา JSON ที่ซ่อนอยู่ใน <script>
+    วิธีนี้ไม่ต้องใช้ Selenium และแก้ปัญหา API ที่เรียกตรงๆ ไม่ได้
     """
-    print("Fetching data directly from API with a browser User-Agent...")
-
-    # --- 🎯 ส่วนที่แก้ไข: เพิ่ม Headers เพื่อปลอมเป็นเบราว์เซอร์ ---
+    print("Fetching data directly from HTML and parsing JavaScript...")
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
-    
     try:
-        # ส่ง Headers ไปพร้อมกับ Request
-        response = requests.get(API_URL, headers=headers, timeout=15)
+        response = requests.get(STATION_URL, headers=headers, timeout=15)
         response.raise_for_status()
 
-        # --- 🎯 ส่วนที่แก้ไข: เพิ่มการตรวจสอบและดักจับ Error ของ JSON ---
-        try:
-            api_data = response.json()
-        except json.JSONDecodeError:
-            print("Error: Failed to decode JSON. The server did not return valid JSON.")
-            print(f"Status Code: {response.status_code}")
-            # พิมพ์สิ่งที่เซิร์ฟเวอร์ส่งกลับมา เพื่อให้เรารู้ว่าคืออะไร
-            print(f"Server response (not JSON): {response.text}")
+        soup = BeautifulSoup(response.text, 'html.parser')
+        scripts = soup.find_all('script')
+        
+        json_data_string = None
+        for script in scripts:
+            if script.string and 'var tele_data_wl' in script.string:
+                # เจอ Script ที่มีข้อมูล เราจะตัดเอาเฉพาะส่วนที่เป็น JSON
+                text = script.string
+                start = text.find('[')
+                end = text.rfind(']') + 1
+                json_data_string = text[start:end]
+                break
+        
+        if not json_data_string:
+            print("Could not find JavaScript variable 'tele_data_wl' in the page.")
             return None
-        # --- จบส่วนแก้ไข ---
 
+        all_stations_data = json.loads(json_data_string)
+        
         target_station_data = None
-        for station in api_data.get('data', []):
+        for station in all_stations_data:
             if station.get('id') == STATION_ID_TO_FIND:
                 target_station_data = station
                 break
         
         if not target_station_data:
-            print(f"Could not find station {STATION_ID_TO_FIND} in the API response.")
+            print(f"Could not find station {STATION_ID_TO_FIND} in the parsed data.")
             return None
 
         station_name = f"ต.{target_station_data.get('tumbon')} อ.{target_station_data.get('amphoe')}"
@@ -70,19 +76,24 @@ def get_inburi_river_data():
         }
 
     except requests.exceptions.RequestException as e:
-        print(f"An error occurred while calling the API: {e}")
+        print(f"An error occurred while fetching HTML: {e}")
         return None
-    except (KeyError, ValueError) as e:
-        print(f"Error parsing API data: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
         return None
+
 
 def send_line_message(data, change_amount):
     """ส่งข้อความไปยัง LINE พร้อมระบุการเปลี่ยนแปลง"""
     now_thailand = datetime.now(TIMEZONE_THAILAND)
     formatted_datetime = now_thailand.strftime("%d/%m/%Y %H:%M น.")
     
-    change_direction_icon = "⬆️" if change_amount > 0 else "⬇️"
-    change_text = f"เปลี่ยนแปลง {change_direction_icon} {abs(change_amount):.2f} ม."
+    # สำหรับการแจ้งเตือนครั้งแรก ไม่ต้องแสดงการเปลี่ยนแปลง
+    if change_amount == 0.0:
+        change_text = "รายงานข้อมูลครั้งแรก"
+    else:
+        change_direction_icon = "⬆️" if change_amount > 0 else "⬇️"
+        change_text = f"เปลี่ยนแปลง {change_direction_icon} {abs(change_amount):.2f} ม."
     
     if data['overflow'] > 0:
         status_text, status_icon, overflow_text = "⚠️ *น้ำล้นตลิ่ง*", "🚨", f"{data['overflow']:.2f} ม."
@@ -112,6 +123,7 @@ def send_line_message(data, change_amount):
     except requests.exceptions.RequestException as e:
         print(f"Error sending LINE message: {e.response.text if e.response else 'No response'}")
 
+
 def read_last_data(file_path):
     if os.path.exists(file_path):
         with open(file_path, 'r') as f:
@@ -121,9 +133,11 @@ def read_last_data(file_path):
                 return None
     return None
 
+
 def write_data(file_path, data):
     with open(file_path, 'w') as f:
         f.write(str(data))
+
 
 def main():
     current_data_dict = get_inburi_river_data()
@@ -157,6 +171,7 @@ def main():
     
     print(f"Saving current level ({current_level:.2f}) to {LAST_DATA_FILE}.")
     write_data(LAST_DATA_FILE, current_level)
+
 
 if __name__ == "__main__":
     main()

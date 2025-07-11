@@ -4,6 +4,12 @@ import json
 from datetime import datetime
 import pytz
 from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 # --- การตั้งค่าทั่วไป ---
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
@@ -11,31 +17,46 @@ LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
 TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 
 # --- การตั้งค่าสำหรับสคริปต์นี้โดยเฉพาะ ---
-STATION_URL = "https://singburi.thaiwater.net/wl" # กลับมาใช้ URL ของหน้าเว็บหลัก
+STATION_URL = "https://singburi.thaiwater.net/wl"
 LAST_DATA_FILE = 'last_inburi_data.txt'
 STATION_ID_TO_FIND = "C.35"
 NOTIFICATION_THRESHOLD_METERS = 0.20
 
 def get_inburi_river_data():
     """
-    ดึงข้อมูลโดยการอ่านหน้า HTML แล้วสกัดเอา JSON ที่ซ่อนอยู่ใน <script>
-    วิธีนี้ไม่ต้องใช้ Selenium และแก้ปัญหา API ที่เรียกตรงๆ ไม่ได้
+    ดึงข้อมูลโดยใช้ Selenium เพื่อรอให้ JavaScript ของเว็บทำงานเสร็จก่อน
+    จากนั้นจึงดึงข้อมูล JSON ที่ซ่อนอยู่ใน <script>
     """
-    print("Fetching data directly from HTML and parsing JavaScript...")
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
+    print("Fetching data using Selenium to render JavaScript...")
+    
+    # ตั้งค่า Chrome ให้ทำงานแบบไม่มีหน้าจอ (Headless)
+    options = webdriver.ChromeOptions()
+    options.add_argument('--headless')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    
     try:
-        response = requests.get(STATION_URL, headers=headers, timeout=15)
-        response.raise_for_status()
-
-        soup = BeautifulSoup(response.text, 'html.parser')
+        # ติดตั้งและจัดการ ChromeDriver อัตโนมัติ
+        service = ChromeService(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=options)
+        
+        driver.get(STATION_URL)
+        
+        # รอให้ JavaScript โหลดข้อมูล โดยรอจนกว่าจะเจอ script ที่มีตัวแปร 'tele_data_wl'
+        # หรือรอสูงสุด 30 วินาที
+        WebDriverWait(driver, 30).until(
+            lambda d: d.execute_script("return typeof tele_data_wl !== 'undefined';")
+        )
+        
+        # เมื่อแน่ใจว่าข้อมูลโหลดแล้ว จึงดึงโค้ดหน้าเว็บ (Page Source) ออกมา
+        html_content = driver.page_source
+        
+        soup = BeautifulSoup(html_content, 'html.parser')
         scripts = soup.find_all('script')
         
         json_data_string = None
         for script in scripts:
             if script.string and 'var tele_data_wl' in script.string:
-                # เจอ Script ที่มีข้อมูล เราจะตัดเอาเฉพาะส่วนที่เป็น JSON
                 text = script.string
                 start = text.find('[')
                 end = text.rfind(']') + 1
@@ -43,7 +64,7 @@ def get_inburi_river_data():
                 break
         
         if not json_data_string:
-            print("Could not find JavaScript variable 'tele_data_wl' in the page.")
+            print("Could not find JavaScript variable 'tele_data_wl' in the page even after waiting.")
             return None
 
         all_stations_data = json.loads(json_data_string)
@@ -75,13 +96,12 @@ def get_inburi_river_data():
             "overflow": overflow
         }
 
-    except requests.exceptions.RequestException as e:
-        print(f"An error occurred while fetching HTML: {e}")
-        return None
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        print(f"An unexpected error occurred during Selenium process: {e}")
         return None
-
+    finally:
+        if 'driver' in locals() and driver:
+            driver.quit()
 
 def send_line_message(data, change_amount):
     """ส่งข้อความไปยัง LINE พร้อมระบุการเปลี่ยนแปลง"""

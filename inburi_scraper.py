@@ -10,6 +10,7 @@ from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager # 👈 [เพิ่ม] import ที่จำเป็น
 
 # --- การตั้งค่าทั่วไป ---
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
@@ -26,16 +27,19 @@ def get_inburi_river_data():
     print("Setting up Selenium Chrome driver with robust options for GitHub Actions...")
     options = webdriver.ChromeOptions()
     
-    # --- 🎯 ส่วนที่แก้ไข ---
-    # เพิ่ม Arguments เพื่อให้ Chrome ทำงานในโหมด Headless ได้อย่างเสถียรที่สุด
-    options.add_argument("--headless=new")  # ใช้โหมด Headless แบบใหม่
+    options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu") # ปิดการใช้งาน GPU ซึ่งไม่จำเป็นใน Server
-    options.add_argument("--window-size=1920,1080") # กำหนดขนาดหน้าจอเสมือน
-    # --- จบส่วนที่แก้ไข ---
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
 
-    service = ChromeService()
+    # --- 🎯 ส่วนที่แก้ไข ---
+    # ใช้ webdriver-manager เพื่อติดตั้งและจัดการ chromedriver โดยอัตโนมัติ
+    # ทำให้สคริปต์มีความเสถียรมากขึ้นเมื่อรันบน GitHub Actions
+    print("Installing/Updating chromedriver with webdriver-manager...")
+    service = ChromeService(ChromeDriverManager().install())
+    # --- จบส่วนที่แก้ไข ---
+    
     driver = webdriver.Chrome(service=service, options=options)
     
     try:
@@ -43,7 +47,8 @@ def get_inburi_river_data():
         driver.get(STATION_URL)
 
         print("Waiting for data table to be loaded by JavaScript...")
-        wait = WebDriverWait(driver, 30)
+        # เพิ่มเวลา timeout เป็น 60 วินาที เพื่อให้มีเวลาโหลดมากขึ้น
+        wait = WebDriverWait(driver, 60) 
         table_element = wait.until(EC.presence_of_element_located((By.ID, 'tele_wl')))
         
         print("Table found! Parsing data...")

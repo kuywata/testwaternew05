@@ -24,10 +24,12 @@ jobs:
         with:
           python-version: '3.10'
 
-      # 3. (สำคัญ) ติดตั้ง Google Chrome กลับมาอีกครั้ง
-      - name: Setup Chrome
+      # 3. (สำคัญ) ติดตั้ง Google Chrome และ ChromeDriver ที่เข้ากัน
+      - name: Setup Chrome and ChromeDriver
         uses: browser-actions/setup-chrome@latest
-      
+        with:
+          install-chromedriver: true
+
       # 4. ติดตั้งไลบรารีที่จำเป็น
       - name: Install dependencies
         run: pip install -r requirements.txt

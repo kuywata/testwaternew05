@@ -3,8 +3,8 @@ import os
 import json
 from datetime import datetime
 import pytz
-from selenium import webdriver
-from selenium.common.exceptions import WebDriverException
+from bs4 import BeautifulSoup
+import urllib.parse
 
 # --- การตั้งค่าทั่วไป ---
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
@@ -13,62 +13,52 @@ TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 
 # --- การตั้งค่าสำหรับสคริปต์นี้โดยเฉพาะ ---
 BASE_URL = "https://singburi.thaiwater.net/wl"
-API_PATH = "/api/v1/tele_waterlevel"
+API_URL = "https://singburi.thaiwater.net/api/v1/tele_waterlevel"
 LAST_DATA_FILE = 'last_inburi_data.txt'
 STATION_ID_TO_FIND = "C.35"
 NOTIFICATION_THRESHOLD_METERS = 0.20
 
 def get_inburi_river_data():
     """
-    วิธีไฮบริด (สมบูรณ์ที่สุด):
-    1. ใช้ Selenium เปิดหน้าเว็บหลัก เพื่อให้ได้สภาพแวดล้อมที่สมบูรณ์
-    2. สั่งให้ Selenium รัน JavaScript เพื่อยิง `fetch` ไปยัง API เองจากในเบราว์เซอร์
-    3. รับข้อมูล JSON ที่ได้กลับมาใน Python แล้วประมวลผลต่อ
+    ดึงข้อมูลโดยการเรียก API ของเว็บโดยตรง โดยใช้ Header ที่สมบูรณ์
     """
-    print("Initializing Hybrid Selenium Scraper...")
-    
-    options = webdriver.ChromeOptions()
-    options.add_argument('--headless=new')
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument('--window-size=1920,1080')
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
-    
-    driver = None 
+    print("Attempting direct API call with comprehensive headers...")
     try:
-        # ไม่ต้องใช้ webdriver-manager เพราะ Workflow ติดตั้งให้แล้ว
-        driver = webdriver.Chrome(options=options)
-        driver.set_page_load_timeout(180) # เพิ่มเวลารอโหลดหน้าเว็บเป็น 3 นาที
+        session = requests.Session()
         
-        print(f"Loading base page at {BASE_URL} to establish a valid browser context...")
-        driver.get(BASE_URL)
+        # 1. เข้าหน้าเว็บหลักเพื่อรับ Session และ Cookies
+        base_headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
+        print(f"Visiting {BASE_URL} to get session cookies...")
+        main_page_response = session.get(BASE_URL, headers=base_headers, timeout=30)
+        main_page_response.raise_for_status()
         
-        js_to_execute = f"""
-            return new Promise((resolve, reject) => {{
-                fetch('{API_PATH}')
-                    .then(response => {{
-                        if (!response.ok) {{
-                            reject('API response was not ok: ' + response.status);
-                        }}
-                        return response.json();
-                    }})
-                    .then(data => {{
-                        resolve(data);
-                    }})
-                    .catch(error => {{
-                        reject('Fetch API error: ' + error);
-                    }});
-            }});
-        """
-        
-        print(f"Executing JavaScript to fetch data from '{API_PATH}'...")
-        all_stations_data = driver.execute_script(js_to_execute)
-        
-        if not all_stations_data:
-            print("Error: JavaScript fetch command did not return any data.")
+        # 2. อ่านค่า XSRF-TOKEN จากคุกกี้ที่เซิร์ฟเวอร์ส่งมาให้
+        xsrf_cookie = session.cookies.get('XSRF-TOKEN')
+        if not xsrf_cookie:
+            print("Fatal Error: Could not find 'XSRF-TOKEN' cookie. The website's security has likely changed.")
             return None
         
-        print("Successfully received API data. Processing...")
+        csrf_token = urllib.parse.unquote(xsrf_cookie)
+        print("Successfully retrieved XSRF token from cookie.")
+
+        # 3. สร้าง Header สำหรับยิง API
+        api_headers = base_headers.copy()
+        api_headers.update({
+            'X-CSRF-TOKEN': csrf_token,
+            'X-Requested-With': 'XMLHttpRequest',
+            'Referer': BASE_URL
+        })
+        
+        print(f"Calling API at {API_URL}...")
+        api_response = session.get(API_URL, headers=api_headers, timeout=30)
+        api_response.raise_for_status()
+
+        # 4. แปลงข้อมูล JSON
+        all_stations_data = api_response.json()
         target_station_data = next((s for s in all_stations_data if s.get('id') == STATION_ID_TO_FIND), None)
 
         if not target_station_data:
@@ -85,16 +75,20 @@ def get_inburi_river_data():
 
         return {"station": station_name, "water_level": water_level, "bank_level": bank_level, "overflow": overflow}
 
-    except WebDriverException as e:
-        print(f"An error occurred with Selenium: {e}")
+    except requests.exceptions.RequestException as e:
+        print(f"An HTTP error occurred: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"Status Code: {e.response.status_code}")
+            print(f"Response Body: {e.response.text[:500]}")
+        return None
+    except json.JSONDecodeError:
+        print("JSON Decode Error: Failed to parse API response.")
+        if 'api_response' in locals():
+            print(f"Response Text (first 500 chars): {api_response.text[:500]}")
         return None
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
         return None
-    finally:
-        if driver:
-            print("Closing WebDriver.")
-            driver.quit()
 
 def send_line_message(data, change_amount):
     now_thailand = datetime.now(TIMEZONE_THAILAND)

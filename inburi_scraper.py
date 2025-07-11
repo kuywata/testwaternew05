@@ -3,8 +3,12 @@ import os
 import json
 from datetime import datetime
 import pytz
-from bs4 import BeautifulSoup
-import urllib.parse
+
+# เราจะกลับมาใช้ Selenium อีกครั้ง
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.common.exceptions import WebDriverException
 
 # --- การตั้งค่าทั่วไป ---
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
@@ -13,54 +17,65 @@ TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 
 # --- การตั้งค่าสำหรับสคริปต์นี้โดยเฉพาะ ---
 BASE_URL = "https://singburi.thaiwater.net/wl"
-API_URL = "https://singburi.thaiwater.net/api/v1/tele_waterlevel"
+API_PATH = "/api/v1/tele_waterlevel" # ใช้แค่ Path ก็พอ
 LAST_DATA_FILE = 'last_inburi_data.txt'
 STATION_ID_TO_FIND = "C.35"
 NOTIFICATION_THRESHOLD_METERS = 0.20
 
 def get_inburi_river_data():
     """
-    ดึงข้อมูลโดยการเรียก API ของเว็บโดยตรง
-    วิธีที่สมบูรณ์: อ่าน CSRF Token จากคุกกี้ 'XSRF-TOKEN' โดยตรง
+    วิธีไฮบริด (สมบูรณ์ที่สุด):
+    1. ใช้ Selenium เปิดหน้าเว็บหลัก เพื่อให้ได้สภาพแวดล้อม (คุกกี้, session) ที่สมบูรณ์
+    2. สั่งให้ Selenium รัน JavaScript เพื่อยิง `fetch` ไปยัง API เองจากในเบราว์เซอร์
+    3. รับข้อมูล JSON ที่ได้กลับมาใน Python แล้วประมวลผลต่อ
     """
-    print("Fetching data via direct API call...")
+    print("Initializing Hybrid Selenium Scraper...")
+    
+    options = webdriver.ChromeOptions()
+    options.add_argument('--headless=new')
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument('--window-size=1920,1080')
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+    
+    driver = None 
     try:
-        session = requests.Session()
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-            'Accept': 'application/json' # บอกว่าเรารับ JSON ได้
-        }
+        service = ChromeService(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=options)
         
-        # 1. เข้าหน้าเว็บหลักเพื่อรับ Session และ Cookies
-        print(f"Visiting {BASE_URL} to get session cookies...")
-        session.get(BASE_URL, headers=headers, timeout=20).raise_for_status()
+        # 1. เข้าหน้าเว็บหลักเพื่อให้ browser สร้าง session และ cookies ที่ถูกต้อง
+        print(f"Loading base page at {BASE_URL} to establish a valid browser context...")
+        driver.get(BASE_URL)
         
-        # 2. อ่านค่า XSRF-TOKEN จากคุกกี้ที่เซิร์ฟเวอร์ส่งมาให้
-        xsrf_cookie = session.cookies.get('XSRF-TOKEN')
-        if not xsrf_cookie:
-            print("Error: Could not find 'XSRF-TOKEN' cookie after visiting the main page.")
+        # 2. สร้าง JavaScript ที่จะใช้ยิง API
+        #    วิธีนี้จะใช้ context ของเบราว์เซอร์ที่เปิดอยู่ ทำให้เหมือนการเรียก API ของหน้าเว็บจริงๆ
+        js_to_execute = f"""
+            return new Promise((resolve, reject) => {{
+                fetch('{API_PATH}')
+                    .then(response => {{
+                        if (!response.ok) {{
+                            reject('API response was not ok: ' + response.status);
+                        }}
+                        return response.json();
+                    }})
+                    .then(data => {{
+                        resolve(data);
+                    }})
+                    .catch(error => {{
+                        reject('Fetch API error: ' + error);
+                    }});
+            }});
+        """
+        
+        print(f"Executing JavaScript to fetch data from '{API_PATH}'...")
+        all_stations_data = driver.execute_script(js_to_execute)
+        
+        if not all_stations_data:
+            print("Error: JavaScript fetch command did not return any data.")
             return None
         
-        # Token ในคุกกี้มักจะถูก encoded เราต้อง decode ก่อนใช้
-        csrf_token = urllib.parse.unquote(xsrf_cookie)
-        print(f"Successfully retrieved CSRF token from cookie.")
-
-        # 3. เตรียม Header สำหรับยิง API
-        api_headers = headers.copy()
-        api_headers.update({
-            'X-CSRF-TOKEN': csrf_token,
-            'X-Requested-With': 'XMLHttpRequest',
-            'Referer': BASE_URL
-        })
-        
-        print(f"Calling API at {API_URL}...")
-        api_response = session.get(API_URL, headers=api_headers, timeout=20)
-        
-        # เช็ค Status code ก่อน
-        api_response.raise_for_status()
-
-        # 4. แปลงข้อมูล JSON
-        all_stations_data = api_response.json()
+        # 3. ประมวลผล JSON ที่ได้มา
+        print("Successfully received API data. Processing...")
         target_station_data = next((s for s in all_stations_data if s.get('id') == STATION_ID_TO_FIND), None)
 
         if not target_station_data:
@@ -77,20 +92,19 @@ def get_inburi_river_data():
 
         return {"station": station_name, "water_level": water_level, "bank_level": bank_level, "overflow": overflow}
 
-    except requests.exceptions.HTTPError as e:
-        print(f"HTTP Error occurred: {e}")
-        if e.response is not None:
-            print(f"Status Code: {e.response.status_code}")
-            print(f"Response Body: {e.response.text[:500]}")
-        return None
-    except json.JSONDecodeError as e:
-        print(f"JSON Decode Error: Failed to parse API response. Error: {e}")
-        print(f"Response Text (first 500 chars): {api_response.text[:500]}")
+    except WebDriverException as e:
+        print(f"An error occurred with Selenium: {e}")
         return None
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
         return None
+    finally:
+        if driver:
+            print("Closing WebDriver.")
+            driver.quit()
 
+
+# ฟังก์ชันที่เหลือทั้งหมด (send_line_message, read_last_data, write_data, main) ให้ใช้ของเดิม ไม่ต้องแก้ไข
 def send_line_message(data, change_amount):
     now_thailand = datetime.now(TIMEZONE_THAILAND)
     formatted_datetime = now_thailand.strftime("%d/%m/%Y %H:%M น.")

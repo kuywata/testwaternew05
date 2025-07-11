@@ -5,84 +5,73 @@ from datetime import datetime
 import pytz
 from bs4 import BeautifulSoup
 
-# เพิ่ม import ที่จำเป็นสำหรับ Selenium
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service as ChromeService
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.by import By
-from selenium.common.exceptions import TimeoutException
-
 # --- การตั้งค่าทั่วไป ---
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
 TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 
 # --- การตั้งค่าสำหรับสคริปต์นี้โดยเฉพาะ ---
-STATION_URL = "https://singburi.thaiwater.net/wl"
+BASE_URL = "https://singburi.thaiwater.net/wl"
+API_URL = "https://singburi.thaiwater.net/api/v1/tele_waterlevel"
 LAST_DATA_FILE = 'last_inburi_data.txt'
 STATION_ID_TO_FIND = "C.35"
 NOTIFICATION_THRESHOLD_METERS = 0.20
 
 def get_inburi_river_data():
     """
-    ดึงข้อมูลโดยใช้ Selenium และรอจนกว่า 'ตารางข้อมูล' จะแสดงผล
-    ซึ่งเป็นวิธีที่เสถียรกว่าการรอ JavaScript variable โดยตรง
+    ดึงข้อมูลโดยการเรียก API ของเว็บโดยตรง (วิธีที่เสถียรที่สุด)
+    ขั้นตอน:
+    1. สร้าง Session เพื่อจัดการคุกกี้อัตโนมัติ
+    2. เข้าหน้าเว็บหลัก (BASE_URL) เพื่อรับ CSRF Token จาก meta tag
+    3. นำ Token ที่ได้ไปใช้เป็น Header ในการเรียก API_URL
     """
-    print("Initializing Selenium WebDriver...")
-    
-    options = webdriver.ChromeOptions()
-    options.add_argument('--headless')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--window-size=1920,1080')
-    
-    driver = None 
+    print("Fetching data via direct API call...")
     try:
-        service = ChromeService(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=options)
+        # 1. สร้าง Session เพื่อเก็บคุกกี้ระหว่าง requests
+        session = requests.Session()
         
-        wait_timeout = 60  # เพิ่มเวลารอเป็น 60 วินาที
+        # ตั้งค่า Header ให้เหมือนเบราว์เซอร์จริง
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+        }
         
-        print(f"Navigating to {STATION_URL}...")
-        driver.get(STATION_URL)
-        print(f"Page title is: '{driver.title}'")
-
-        # --- ส่วนที่แก้ไข ---
-        # เปลี่ยนจากการรอตัวแปร JavaScript เป็นการรอให้ 'แถวแรกของตารางข้อมูล' ปรากฏขึ้น
-        print(f"Waiting for up to {wait_timeout} seconds for the data table (#wl-table) to be populated...")
-        WebDriverWait(driver, wait_timeout).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "#wl-table tbody tr"))
-        )
-        # --------------------
+        # 2. เข้าหน้าเว็บหลักเพื่อเอา CSRF Token
+        print(f"Visiting {BASE_URL} to get CSRF token...")
+        main_page_response = session.get(BASE_URL, headers=headers, timeout=20)
+        main_page_response.raise_for_status()
         
-        print("Data table is present. Parsing data...")
-        html_content = driver.page_source
+        # ดึง Token จาก <meta> tag
+        soup = BeautifulSoup(main_page_response.text, 'html.parser')
+        token_tag = soup.find('meta', {'name': 'csrf-token'})
         
-        soup = BeautifulSoup(html_content, 'html.parser')
-        scripts = soup.find_all('script')
-        
-        json_data_string = None
-        for script in scripts:
-            if script.string and 'var tele_data_wl' in script.string:
-                text = script.string
-                start = text.find('[')
-                end = text.rfind(']') + 1
-                json_data_string = text[start:end]
-                break
-        
-        if not json_data_string:
-            print("Could not find JavaScript variable 'tele_data_wl' even after the table appeared.")
+        if not token_tag or not token_tag.get('content'):
+            print("Error: Could not find CSRF token on the main page.")
             return None
+            
+        csrf_token = token_tag.get('content')
+        print(f"Successfully retrieved CSRF token.")
 
-        all_stations_data = json.loads(json_data_string)
+        # 3. เตรียม Header สำหรับยิง API
+        api_headers = headers.copy()
+        api_headers.update({
+            'X-CSRF-TOKEN': csrf_token,
+            'X-Requested-With': 'XMLHttpRequest', # บอก Server ว่าเป็นการเรียกข้อมูลเบื้องหลัง
+            'Referer': BASE_URL # อ้างอิงว่าเรามาจากหน้าเว็บหลัก
+        })
+        
+        # ยิง Request ไปที่ API
+        print(f"Calling API at {API_URL}...")
+        api_response = session.get(API_URL, headers=api_headers, timeout=20)
+        api_response.raise_for_status()
+        
+        # 4. แปลงข้อมูล JSON และค้นหาสถานี
+        all_stations_data = api_response.json()
         target_station_data = next((s for s in all_stations_data if s.get('id') == STATION_ID_TO_FIND), None)
-        
-        if not target_station_data:
-            print(f"Could not find station {STATION_ID_TO_FIND} in the parsed data.")
-            return None
 
+        if not target_station_data:
+            print(f"Could not find station {STATION_ID_TO_FIND} in the API response.")
+            return None
+        
         station_name = f"ต.{target_station_data.get('tumbon')} อ.{target_station_data.get('amphoe')}"
         water_level = float(target_station_data.get('level', 0))
         bank_level = float(target_station_data.get('bank', 0))
@@ -93,20 +82,14 @@ def get_inburi_river_data():
 
         return {"station": station_name, "water_level": water_level, "bank_level": bank_level, "overflow": overflow}
 
-    except TimeoutException:
-        print(f"Error: Timed out after {wait_timeout} seconds waiting for the data table to appear.")
-        if driver:
-            print("Page source at the time of timeout (first 2000 chars):")
-            print(driver.page_source[:2000]) 
+    except requests.exceptions.RequestException as e:
+        print(f"An error occurred during the request: {e}")
         return None
     except Exception as e:
-        print(f"An unexpected error occurred during Selenium process: {e}")
+        print(f"An unexpected error occurred: {e}")
         return None
-    finally:
-        if driver:
-            print("Closing WebDriver.")
-            driver.quit()
 
+# ฟังก์ชันที่เหลือทั้งหมด (send_line_message, read_last_data, write_data, main) ให้ใช้ของเดิม ไม่ต้องแก้ไข
 def send_line_message(data, change_amount):
     now_thailand = datetime.now(TIMEZONE_THAILAND)
     formatted_datetime = now_thailand.strftime("%d/%m/%Y %H:%M น.")

@@ -1,9 +1,8 @@
 import requests
 import os
+import json
 from datetime import datetime
 import pytz
-
-# --- ไม่ต้องใช้ Selenium หรือ BeautifulSoup อีกต่อไป ---
 
 # --- การตั้งค่าทั่วไป ---
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
@@ -11,7 +10,6 @@ LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
 TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 
 # --- การตั้งค่าสำหรับสคริปต์นี้โดยเฉพาะ ---
-# 🎯 เปลี่ยนไปใช้ URL ของ API โดยตรง
 API_URL = "https://singburi.thaiwater.net/api/get_wl"
 LAST_DATA_FILE = 'last_inburi_data.txt'
 STATION_ID_TO_FIND = "C.35"
@@ -19,17 +17,31 @@ NOTIFICATION_THRESHOLD_METERS = 0.20
 
 def get_inburi_river_data():
     """
-    ดึงข้อมูลระดับน้ำโดยตรงจาก API ของเว็บ (ไม่ต้องใช้ Selenium)
-    วิธีนี้เร็วกว่าและเสถียรกว่ามาก
+    ดึงข้อมูลระดับน้ำโดยตรงจาก API ของเว็บ พร้อมปลอม User-Agent
     """
-    print("Fetching data directly from API...")
-    try:
-        # ใช้ requests เพื่อยิงไปที่ API โดยตรง
-        response = requests.get(API_URL, timeout=15)
-        response.raise_for_status() # ทำให้เกิด Error ถ้าสถานะไม่ใช่ 200
-        api_data = response.json()
+    print("Fetching data directly from API with a browser User-Agent...")
 
-        # api_data['data'] จะเป็น list ของสถานีทั้งหมด
+    # --- 🎯 ส่วนที่แก้ไข: เพิ่ม Headers เพื่อปลอมเป็นเบราว์เซอร์ ---
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
+    try:
+        # ส่ง Headers ไปพร้อมกับ Request
+        response = requests.get(API_URL, headers=headers, timeout=15)
+        response.raise_for_status()
+
+        # --- 🎯 ส่วนที่แก้ไข: เพิ่มการตรวจสอบและดักจับ Error ของ JSON ---
+        try:
+            api_data = response.json()
+        except json.JSONDecodeError:
+            print("Error: Failed to decode JSON. The server did not return valid JSON.")
+            print(f"Status Code: {response.status_code}")
+            # พิมพ์สิ่งที่เซิร์ฟเวอร์ส่งกลับมา เพื่อให้เรารู้ว่าคืออะไร
+            print(f"Server response (not JSON): {response.text}")
+            return None
+        # --- จบส่วนแก้ไข ---
+
         target_station_data = None
         for station in api_data.get('data', []):
             if station.get('id') == STATION_ID_TO_FIND:
@@ -40,7 +52,6 @@ def get_inburi_river_data():
             print(f"Could not find station {STATION_ID_TO_FIND} in the API response.")
             return None
 
-        # ดึงข้อมูลจาก JSON ที่ได้มา
         station_name = f"ต.{target_station_data.get('tumbon')} อ.{target_station_data.get('amphoe')}"
         water_level = float(target_station_data.get('level', 0))
         bank_level = float(target_station_data.get('bank', 0))

@@ -3,7 +3,6 @@ from bs4 import BeautifulSoup
 import json
 import time
 
-# --- เพิ่ม Library ของ Selenium ---
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -11,40 +10,49 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
-# --- ค่าคงที่ ---
 URL = "https://singburi.thaiwater.net/wl"
 STATION_NAME_TO_FIND = "อินทร์บุรี"
 
 def get_inburi_data_selenium():
     """
-    ดึงข้อมูลระดับน้ำด้วย Selenium เพื่อให้รอ JavaScript โหลดข้อมูลเสร็จก่อน
+    ดึงข้อมูลระดับน้ำด้วย Selenium (เพิ่มการจัดการ iframe)
     """
     options = webdriver.ChromeOptions()
-    options.add_argument('--headless=new')  # รันแบบไม่แสดงหน้าจอ
+    options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
 
-    # ใช้ try...finally เพื่อให้แน่ใจว่า browser จะถูกปิดเสมอ
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     try:
         print(f"กำลังเปิดหน้าเว็บด้วย Selenium: {URL}")
         driver.get(URL)
+        time.sleep(3) # รอหน้าเว็บโหลดเบื้องต้น
 
-        # --- จุดสำคัญ: รอจนกว่าข้อมูลในตารางจะปรากฏ ---
-        # เรารอแถวแรก (tr) ใน tbody ของตาราง โดยให้เวลารอสูงสุด 20 วินาที
+        # --- จุดที่แก้ไข: เพิ่มการตรวจสอบและสลับไปที่ IFRAME ---
+        try:
+            print("กำลังตรวจสอบหา iframe...")
+            iframe = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.TAG_NAME, "iframe"))
+            )
+            driver.switch_to.frame(iframe)
+            print("สลับเข้ามาใน iframe สำเร็จ!")
+        except Exception:
+            print("ไม่พบ iframe, ทำงานในหน้าหลักต่อไป")
+        # ----------------------------------------------------
+
         print("กำลังรอให้ JavaScript โหลดตารางข้อมูล...")
         WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr"))
         )
         print("ตารางข้อมูลปรากฏขึ้นแล้ว! เริ่มดึงข้อมูล...")
         
-        # เมื่อข้อมูลมาครบแล้ว ให้ดึง HTML ทั้งหมดของหน้าที่แสดงผลอยู่
         html_content = driver.page_source
         soup = BeautifulSoup(html_content, 'html.parser')
         
         table = soup.find('table')
         if not table:
-            print("ไม่พบตารางข้อมูล แม้จะใช้ Selenium แล้ว")
+            print("ไม่พบตารางข้อมูล แม้จะสลับ iframe แล้ว")
             return None
             
         for row in table.find('tbody').find_all('tr'):
@@ -65,9 +73,12 @@ def get_inburi_data_selenium():
                     "time": cells[6].text.strip(),
                     "source": URL
                 }
+                # สลับกลับมาหน้าหลักก่อนจบการทำงาน
+                driver.switch_to.default_content()
                 return data
 
         print(f"ไม่พบข้อมูลของสถานี '{STATION_NAME_TO_FIND}' ในตาราง")
+        driver.switch_to.default_content()
         return None
 
     except Exception as e:
@@ -79,7 +90,6 @@ def get_inburi_data_selenium():
 
 
 if __name__ == '__main__':
-    # เปลี่ยนมาเรียกใช้ฟังก์ชันของ Selenium
     river_data = get_inburi_data_selenium() 
     
     if river_data:

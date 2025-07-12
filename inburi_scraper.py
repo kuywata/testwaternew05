@@ -14,9 +14,6 @@ URL = "https://singburi.thaiwater.net/wl"
 STATION_NAME_TO_FIND = "อินทร์บุรี"
 
 def get_inburi_data_selenium():
-    """
-    ดึงข้อมูลระดับน้ำด้วย Selenium (เพิ่มการจัดการ iframe)
-    """
     options = webdriver.ChromeOptions()
     options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
@@ -27,57 +24,58 @@ def get_inburi_data_selenium():
     try:
         print(f"กำลังเปิดหน้าเว็บด้วย Selenium: {URL}")
         driver.get(URL)
-        time.sleep(3) # รอหน้าเว็บโหลดเบื้องต้น
-
-        # --- จุดที่แก้ไข: เพิ่มการตรวจสอบและสลับไปที่ IFRAME ---
+        time.sleep(3) 
+        
         try:
             print("กำลังตรวจสอบหา iframe...")
-            iframe = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.TAG_NAME, "iframe"))
-            )
+            iframe = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
             driver.switch_to.frame(iframe)
             print("สลับเข้ามาใน iframe สำเร็จ!")
         except Exception:
             print("ไม่พบ iframe, ทำงานในหน้าหลักต่อไป")
-        # ----------------------------------------------------
 
         print("กำลังรอให้ JavaScript โหลดตารางข้อมูล...")
-        WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr"))
-        )
-        print("ตารางข้อมูลปรากฏขึ้นแล้ว! เริ่มดึงข้อมูล...")
+        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr")))
+        print("ตารางข้อมูลปรากฏขึ้นแล้ว! เริ่มวนหาข้อมูล...")
         
         html_content = driver.page_source
         soup = BeautifulSoup(html_content, 'html.parser')
         
         table = soup.find('table')
         if not table:
-            print("ไม่พบตารางข้อมูล แม้จะสลับ iframe แล้ว")
+            print("ไม่พบตารางข้อมูล")
             return None
             
         for row in table.find('tbody').find_all('tr'):
             cells = row.find_all('td')
-            if cells and STATION_NAME_TO_FIND in cells[1].text:
-                print(f"พบข้อมูลของสถานี: {STATION_NAME_TO_FIND}")
-                
-                water_level_text = cells[2].text.strip()
-                bank_level_text = cells[3].text.strip()
-                diff_text = cells[5].text.strip().replace('ต่ำกว่าตลิ่ง (ม.)','').strip()
+            
+            # --- จุดที่แก้ไข ---
+            if cells and len(cells) > 1:
+                # 1. เพิ่มการ print ชื่อสถานีทุกแถวเพื่อการดีบัก
+                station_text_from_web = cells[1].text.strip()
+                print(f"--> กำลังตรวจสอบแถว: '{station_text_from_web}'")
 
-                data = {
-                    "station_name": cells[1].text.strip().replace('\n', ' '),
-                    "water_level": float(water_level_text) if water_level_text != '-' else 0.0,
-                    "bank_level": float(bank_level_text) if bank_level_text != '-' else 0.0,
-                    "status": cells[4].text.strip(),
-                    "diff_to_bank": float(diff_text) if diff_text != '-' else 0.0,
-                    "time": cells[6].text.strip(),
-                    "source": URL
-                }
-                # สลับกลับมาหน้าหลักก่อนจบการทำงาน
-                driver.switch_to.default_content()
-                return data
+                # 2. เพิ่ม .strip() เพื่อตัดช่องว่างตอนเปรียบเทียบ
+                if STATION_NAME_TO_FIND in station_text_from_web:
+                    print(f"!!! พบข้อมูลของสถานี: {STATION_NAME_TO_FIND} !!!")
+                    
+                    water_level_text = cells[2].text.strip()
+                    bank_level_text = cells[3].text.strip()
+                    diff_text = cells[5].text.strip().replace('ต่ำกว่าตลิ่ง (ม.)','').strip()
 
-        print(f"ไม่พบข้อมูลของสถานี '{STATION_NAME_TO_FIND}' ในตาราง")
+                    data = {
+                        "station_name": cells[1].text.strip().replace('\n', ' '),
+                        "water_level": float(water_level_text) if water_level_text != '-' else 0.0,
+                        "bank_level": float(bank_level_text) if bank_level_text != '-' else 0.0,
+                        "status": cells[4].text.strip(),
+                        "diff_to_bank": float(diff_text) if diff_text != '-' else 0.0,
+                        "time": cells[6].text.strip(),
+                        "source": URL
+                    }
+                    driver.switch_to.default_content()
+                    return data
+
+        print(f"*** ไม่พบข้อมูลของสถานี '{STATION_NAME_TO_FIND}' หลังจากการค้นหาทั้งตาราง ***")
         driver.switch_to.default_content()
         return None
 

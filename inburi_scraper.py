@@ -1,38 +1,54 @@
 import requests
 from bs4 import BeautifulSoup
 import json
+import time
+
+# --- เพิ่ม Library ของ Selenium ---
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
 
 # --- ค่าคงที่ ---
 URL = "https://singburi.thaiwater.net/wl"
 STATION_NAME_TO_FIND = "อินทร์บุรี"
 
-def get_inburi_data():
+def get_inburi_data_selenium():
     """
-    ดึงข้อมูลระดับน้ำของสถานีอินทร์บุรีจากตาราง HTML
+    ดึงข้อมูลระดับน้ำด้วย Selenium เพื่อให้รอ JavaScript โหลดข้อมูลเสร็จก่อน
     """
+    options = webdriver.ChromeOptions()
+    options.add_argument('--headless=new')  # รันแบบไม่แสดงหน้าจอ
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+
+    # ใช้ try...finally เพื่อให้แน่ใจว่า browser จะถูกปิดเสมอ
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     try:
-        print(f"กำลังดึงข้อมูลจาก: {URL}")
-        # เพิ่ม Headers เพื่อเลียนแบบ Browser จริง
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        response = requests.get(URL, headers=headers, timeout=15)
-        response.raise_for_status()
+        print(f"กำลังเปิดหน้าเว็บด้วย Selenium: {URL}")
+        driver.get(URL)
+
+        # --- จุดสำคัญ: รอจนกว่าข้อมูลในตารางจะปรากฏ ---
+        # เรารอแถวแรก (tr) ใน tbody ของตาราง โดยให้เวลารอสูงสุด 20 วินาที
+        print("กำลังรอให้ JavaScript โหลดตารางข้อมูล...")
+        WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr"))
+        )
+        print("ตารางข้อมูลปรากฏขึ้นแล้ว! เริ่มดึงข้อมูล...")
         
-        soup = BeautifulSoup(response.content, 'html.parser')
+        # เมื่อข้อมูลมาครบแล้ว ให้ดึง HTML ทั้งหมดของหน้าที่แสดงผลอยู่
+        html_content = driver.page_source
+        soup = BeautifulSoup(html_content, 'html.parser')
         
-        # --- จุดที่แก้ไข ---
-        # เปลี่ยนจากการหา class เป็นการหา <table_第一個> ที่เจอในหน้า
-        table = soup.find('table') 
-        # -----------------
-        
+        table = soup.find('table')
         if not table:
-            print("ไม่พบตารางข้อมูลใดๆ ในหน้าเว็บ")
+            print("ไม่พบตารางข้อมูล แม้จะใช้ Selenium แล้ว")
             return None
             
         for row in table.find('tbody').find_all('tr'):
             cells = row.find_all('td')
-            
             if cells and STATION_NAME_TO_FIND in cells[1].text:
                 print(f"พบข้อมูลของสถานี: {STATION_NAME_TO_FIND}")
                 
@@ -54,16 +70,17 @@ def get_inburi_data():
         print(f"ไม่พบข้อมูลของสถานี '{STATION_NAME_TO_FIND}' ในตาราง")
         return None
 
-    except requests.exceptions.RequestException as e:
-        print(f"เกิดข้อผิดพลาดในการเชื่อมต่อ: {e}")
-        return None
     except Exception as e:
-        print(f"เกิดข้อผิดพลาดไม่คาดคิด: {e}")
+        print(f"เกิดข้อผิดพลาดระหว่างการทำงานของ Selenium: {e}")
         return None
+    finally:
+        print("ปิดการทำงานของ Selenium browser")
+        driver.quit()
 
 
 if __name__ == '__main__':
-    river_data = get_inburi_data()
+    # เปลี่ยนมาเรียกใช้ฟังก์ชันของ Selenium
+    river_data = get_inburi_data_selenium() 
     
     if river_data:
         print("\nข้อมูลที่ดึงได้:")

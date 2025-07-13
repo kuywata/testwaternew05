@@ -1,60 +1,48 @@
-name: In Buri Bridge River Alert
+name: Inburi River Alert
 
 on:
-  # อนุญาตให้กดรันเองได้จากหน้า Actions
   workflow_dispatch:
-
-  # ทำงานอัตโนมัติตามตารางเวลา
   schedule:
-    # ทำงานทุก 15 นาที (ที่นาที 0, 15, 30, 45 ของทุกชั่วโมง)
+    # ทุก 15 นาที
     - cron: '*/15 * * * *'
 
-# กำหนดสิทธิ์ให้ Action สามารถเขียนไฟล์กลับเข้ามาใน Repository ได้
-permissions:
-  contents: write
-
 jobs:
-  run-alert:
+  alert:
     runs-on: ubuntu-latest
+    env:
+      # ค่าที่ต้องตั้งใน Settings → Secrets ของ repo
+      LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+      # ถ้าอยากปรับเกณฑ์แจ้งเตือน เปลี่ยนที่นี่ (หน่วยเมตร)
+      NOTIFICATION_THRESHOLD_M: 0.10
+
     steps:
-      # 1. เช็คเอาท์โค้ดจาก Repository ของเรา
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. ตั้งค่า Python เวอร์ชัน 3.10
-      - name: Set up Python
+      - name: Setup Python 3.10
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      # 3. ติดตั้ง Library ที่จำเป็น (requests และ pytz)
-      - name: Install dependencies
+      - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
-          pip install requests pytz
+          pip install requests beautifulsoup4 selenium
 
-      # 4. รันสคริปต์ Python เพื่อดึงข้อมูลและแจ้งเตือน
-      - name: Run Alert Script
-        env:
-          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-          LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
+      - name: Install Chromium (for Selenium)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser chromium-chromedriver
+
+      - name: Run alert script
         run: python inburi_bridge_alert.py
 
-      # 5. Commit และ Push ไฟล์ข้อมูลที่อัปเดตกลับเข้า Repository
-      - name: Commit and push if data changed
+      - name: Commit updated data file
         run: |
-          # ตั้งค่า git สำหรับ commit
+          git config --local user.name  "GitHub Action"
           git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          
-          # ตรวจสอบว่ามีไฟล์ข้อมูลอยู่หรือไม่
-          if [ -f "inburi_bridge_data.json" ]; then
-            git add inburi_bridge_data.json
-            
-            # ตรวจสอบว่าไฟล์มีการเปลี่ยนแปลงหรือไม่ ถ้ามี ให้ commit และ push
-            git diff --staged --quiet || (git commit -m "Update In Buri bridge water level data" && git push)
-            
-            echo "Data file checked. Commit pushed if changed."
-          else
-            echo "Data file not found. No changes to commit."
-          fi
+          git add inburi_bridge_data.json
+          git diff --staged --quiet || (
+            git commit -m "Update river level data"
+            git push
+          )

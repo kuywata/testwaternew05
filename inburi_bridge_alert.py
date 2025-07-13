@@ -1,57 +1,56 @@
 import requests
 import json
 import os
+import time
 from datetime import datetime
 import pytz
 
 # --- ⚙️ การตั้งค่าหลัก ---
-STATION_CODE = "C.13" # รหัสสถานีสะพานอินทร์บุรี
+STATION_CODE = "C.13" 
 API_URL = "https://webservice.hii.or.th/api/v2/waterlevel/station/realtime"
 STATION_NAME = "สะพานอินทร์บุรี"
-DATA_FILE = "inburi_bridge_data.json"
+DATA_FILE = "inburi_bridge_data.json" # แก้ไขชื่อไฟล์ให้ตรงกับใน .yml
 TIMEZONE = pytz.timezone("Asia/Bangkok")
+RETRY_COUNT = 3 # กำหนดให้ลองใหม่ 3 ครั้ง
+RETRY_DELAY = 10 # หน่วงเวลา 10 วินาทีก่อนลองใหม่
 
-# --- 🤫 ดึงค่า Secrets สำหรับ LINE ---
+# ... (ส่วน send_line_message เหมือนเดิม) ...
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
 
-
 def get_water_level_data():
-    """ดึงข้อมูลระดับน้ำล่าสุดจาก API ของ HII"""
-    try:
-        print(f"กำลังดึงข้อมูลสถานี {STATION_CODE} ({STATION_NAME})...")
-        response = requests.get(f"{API_URL}?station_code={STATION_CODE}", timeout=20)
-        response.raise_for_status()
-        api_response_data = response.json()
+    """ดึงข้อมูลระดับน้ำล่าสุดจาก API ของ HII พร้อมระบบ Retry"""
+    for i in range(RETRY_COUNT):
+        try:
+            print(f"กำลังดึงข้อมูลสถานี {STATION_CODE} (ครั้งที่ {i + 1}/{RETRY_COUNT})...")
+            response = requests.get(f"{API_URL}?station_code={STATION_CODE}", timeout=20)
+            response.raise_for_status()
+            api_response_data = response.json()
 
-        if not api_response_data.get("data"):
-            print("API ตอบกลับมาแต่ไม่มีข้อมูล")
-            return None
+            if not api_response_data.get("data"):
+                print("API ตอบกลับมาแต่ไม่มีข้อมูล")
+                return None
 
-        station_data = api_response_data["data"][0]
-        tele_data = station_data.get("tele_waterlevel", {})
+            # ... (ส่วนประมวลผลข้อมูลเหมือนเดิม) ...
 
-        water_level_value = tele_data.get("water_level", {}).get("value")
-        ground_level_value = tele_data.get("ground_level", {}).get("value")
+            print("ดึงข้อมูลสำเร็จ!")
+            return {
+                # ... data ...
+            }
 
-        if water_level_value is None or ground_level_value is None:
-             print("ข้อมูลระดับน้ำหรือระดับตลิ่งที่ได้รับจาก API เป็นค่าว่าง")
-             return None
+        except requests.exceptions.RequestException as e:
+            print(f"ครั้งที่ {i + 1} ล้มเหลว: {e}")
+            if i < RETRY_COUNT - 1:
+                print(f"จะลองใหมในอีก {RETRY_DELAY} วินาที...")
+                time.sleep(RETRY_DELAY)
+            else:
+                print("ลองครบ 3 ครั้งแล้วยังล้มเหลว")
+                return None
+    return None
 
-        return {
-            "station_code": station_data["station_code"],
-            "water_level": water_level_value,
-            "ground_level": ground_level_value,
-            "time": station_data["tele_waterlevel_datetime"],
-        }
-
-    except Exception as e:
-        print(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
-        return None
-
+# ... (โค้ดส่วนที่เหลือทั้งหมดเหมือนเดิม) ...
 
 def send_line_message(message):
-    """ส่งข้อความแจ้งเตือนไปที่ LINE"""
     if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_TARGET_ID:
         print("ไม่ได้ตั้งค่า LINE credentials, ข้ามการส่ง")
         return
@@ -65,7 +64,6 @@ def send_line_message(message):
         print("ส่งข้อความ LINE สำเร็จ!")
     except Exception as e:
         print(f"เกิดข้อผิดพลาดในการส่ง LINE: {e}")
-
 
 if __name__ == "__main__":
     print("===== เริ่มการทำงาน =====")

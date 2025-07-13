@@ -1,19 +1,16 @@
-# .github/workflows/weather_alert.yml
-name: Weather Forecast Alert
+name: Forecast
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '*/15 * * * *'  # run every 15 minutes
-
-permissions:
-  contents: write
+    - cron: '*/15 * * * *'   # ทุก 15 นาที
+  workflow_dispatch:
 
 jobs:
   forecast:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+
     steps:
-      - name: Check out repository
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           persist-credentials: true
@@ -28,12 +25,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run forecast script
+      - name: Run weather forecaster
         env:
+          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-          LINE_TARGET_ID:         ${{ secrets.LINE_TARGET_ID }}
-          OPENWEATHER_API_KEY:     ${{ secrets.OPENWEATHER_API_KEY }}
-        run: python weather_forecaster.py
+          LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
+        run: |
+          python weather_forecaster.py
 
       - name: Commit & Push State Files
         if: always()
@@ -41,15 +39,19 @@ jobs:
           git config user.email "action@github.com"
           git config user.name  "GitHub Action"
 
-          # ถ้าไฟล์ยังไม่มี ให้เขียนค่าเริ่มต้นเพื่อให้ Git เห็นความเปลี่ยนแปลง
+          # สร้างไฟล์ถ้ายังไม่มี
           [ -f last_forecast_id.txt ] || echo "NONE" > last_forecast_id.txt
-          [ -f last_alert_time.txt ]  || echo "0"    > last_alert_time.txt
+          [ -f last_alert_time.txt ]  || echo ""     > last_alert_time.txt
 
+          # เขียน timestamp ปัจจุบัน (Asia/Bangkok) ลงไฟล์ทุกครั้ง
+          date '+%Y-%m-%dT%H:%M:%S%:z' > last_alert_time.txt
+
+          # stage ทั้งสองไฟล์
           git add last_forecast_id.txt last_alert_time.txt
 
-          # คอมมิตเฉพาะเมื่อมีการเปลี่ยนแปลงจริง
+          # commit & push ถ้ามีการเปลี่ยนแปลงใดๆ
           if ! git diff --cached --quiet; then
-            git commit -m "Initialize or update weather alert state files"
+            git commit -m "Update weather alert state files"
             git push
           else
             echo "No changes to commit."

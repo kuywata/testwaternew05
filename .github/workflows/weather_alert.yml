@@ -1,43 +1,60 @@
-name: Weather Alert
+# .github/workflows/weather_alert.yml
+name: Weather Forecast Alert
 
 on:
+  workflow_dispatch:
   schedule:
-    # รันทุกต้นชั่วโมง (Bangkok time)
-    - cron: '0 * * * *'
+    - cron: '*/15 * * * *'  # ทุก 15 นาที
+
+permissions:
+  contents: write
 
 jobs:
   forecast:
-    runs-on: ubuntu-24.04
-
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Check out repository
         uses: actions/checkout@v4
         with:
           persist-credentials: true
 
-      - name: Set up Python
+      - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
-          python-version: '3.x'
+          python-version: '3.10'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Run weather forecaster
-        run: python weather_forecaster.py
-        env:
-          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
-          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-          LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
-
-      - name: Commit & push state files
         run: |
-          if [ -f last_forecast_id.txt ] || [ -f last_alert_time.txt ]; then
-            git config --local user.email "action@github.com"
-            git config --local user.name "GitHub Action"
-            git add last_forecast_id.txt last_alert_time.txt
-            git diff --quiet --staged || git commit -m "Update weather alert state"
-            git push
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run forecast script
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_TARGET_ID:         ${{ secrets.LINE_TARGET_ID }}
+          OPENWEATHER_API_KEY:     ${{ secrets.OPENWEATHER_API_KEY }}
+        run: python weather_forecaster.py
+
+      - name: Commit & push updated state files
+        if: always()
+        run: |
+          # only commit if either file exists & changed
+          git config user.email "action@github.com"
+          git config user.name  "GitHub Action"
+          git pull --rebase
+
+          files=""
+          [ -f last_forecast_id.txt ] && files="$files last_forecast_id.txt"
+          [ -f last_alert_time.txt ] && files="$files last_alert_time.txt"
+
+          if [ -n "$files" ]; then
+            git add $files
+            if ! git diff --cached --quiet; then
+              git commit -m "Update weather alert status"
+              git push
+            else
+              echo "No changes to commit."
+            fi
           else
-            echo "No state files to commit."
+            echo "No state files present; skipping."
           fi

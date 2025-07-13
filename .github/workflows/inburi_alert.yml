@@ -23,12 +23,14 @@ jobs:
         with:
           python-version: '3.10'
 
-      # Install Chromium browser, which is required for Selenium to run the scraper.
-      - name: Install Chromium
+      # Install Google Chrome (stable .deb package) to avoid Chromium Snap issues
+      - name: Install Google Chrome
         run: |
           sudo apt-get update
-          sudo apt-get install -y chromium-browser
-
+          sudo apt-get install -y wget
+          wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo dpkg -i google-chrome-stable_current_amd64.deb || sudo apt-get install -f -y
+          
       - name: Install dependencies
         run: pip install -r requirements.txt
 

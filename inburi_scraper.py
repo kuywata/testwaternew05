@@ -11,7 +11,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
-# Import ChromeOptions for headless configuration
 from selenium.webdriver.chrome.options import Options
 
 # --- Constants ---
@@ -46,7 +45,7 @@ def send_line_message(message):
 def get_inburi_data_selenium():
     print(f"[Attempt 1] Opening page (timeout=60s): {URL}")
     
-    # Configure Chrome options for headless mode in CI/CD environment
+    # Configure Chrome options for headless mode and CI/CD environment
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox") # Required for CI/CD environments
@@ -63,10 +62,12 @@ def get_inburi_data_selenium():
             driver.get(URL)
             print(f"Attempt {attempt} opened page successfully.")
 
-            # Wait for the data table to load (timeout=30s)
-            print(f"[Attempt {attempt}] Waiting for data table (timeout=30s)...")
-            WebDriverWait(driver, 30).until(
-                EC.presence_of_element_located((By.XPATH, "//div[@class='table-responsive']//table"))
+            # Wait for the data table to load (increased timeout to 60s and using visibility check)
+            print(f"[Attempt {attempt}] Waiting for data table (timeout=60s)...")
+            WebDriverWait(driver, 60).until(
+                # Changed from presence_of_element_located to visibility_of_element_located 
+                # and increased timeout to handle dynamic loading of the table data.
+                EC.visibility_of_element_located((By.XPATH, "//div[@class='table-responsive']//table"))
             )
             
             # Find the target station data
@@ -114,7 +115,6 @@ def get_inburi_data_selenium():
             return data
 
         except TimeoutException:
-            print("Attempt 1 timed out or data missing.")
             print(f"Attempt {attempt} timed out or data missing.")
         except Exception as e:
             print(f"An error occurred during attempt {attempt}: {e}")

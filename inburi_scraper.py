@@ -50,6 +50,8 @@ def get_inburi_data_selenium():
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox") # Required for CI/CD environments
     chrome_options.add_argument("--disable-dev-shm-usage") # Recommended for CI/CD environments
+    # Specify Google Chrome binary location
+    chrome_options.binary_location = "/usr/bin/google-chrome" 
 
     driver = None
     max_attempts = 3
@@ -62,7 +64,6 @@ def get_inburi_data_selenium():
             driver.get(URL)
             print(f"Attempt {attempt} opened page successfully.")
 
-            # --- REVISED WAIT STRATEGY ---
             # Wait for the specific station name (อินทร์บุรี) to be visible within the table.
             print(f"[Attempt {attempt}] Waiting for '{STATION_NAME_TO_FIND}' data (timeout=60s)...")
             WebDriverWait(driver, 60).until(

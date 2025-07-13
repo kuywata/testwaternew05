@@ -1,5 +1,7 @@
+# .github/workflows/inburi_alert.yml
 permissions:
-  contents: write
+  contents: write    # required for committing back to the repo
+
 name: Scrape Inburi Water Level
 
 on:
@@ -7,34 +9,42 @@ on:
     branches:
       - main
   schedule:
+    # every hour on the hour
     - cron: '0 * * * *'
   workflow_dispatch:
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: inburi-scrape
+      cancel-in-progress: false
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Run scraper
+      - name: Run Inburi scraper
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
         run: python inburi_scraper.py
-      
-      - name: Commit and push if data changed
+
+      - name: Commit & push if data changed
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add last_inburi_data.txt
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update last river data via API" && git push)
+          git diff --quiet && git diff --staged --quiet \
+            || (git commit -m "Update last river data via API" && git push)

@@ -40,12 +40,16 @@ def send_line_message(message: str):
 
 
 def setup_driver():
-    """ตั้งค่า headless Chrome สำหรับ Selenium"""
+    """ตั้งค่า headless Chrome/Chromium สำหรับ Selenium"""
     chrome_options = Options()
+
+    # กำหนด path ของ Chrome/Chromium binary (อ่านจาก ENV CHROME_BIN)
+    chrome_bin = os.getenv("CHROME_BIN", "/usr/bin/chromium-browser")
+    chrome_options.binary_location = chrome_bin
+
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    # ถ้า path ของ chromium ไม่ตรง ให้ตั้ง ENV CHROME_BIN ให้ชี้ไป /usr/bin/chromium-browser
     driver = webdriver.Chrome(options=chrome_options)
     return driver
 

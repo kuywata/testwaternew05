@@ -1,8 +1,10 @@
-name: Forecast
+name: Weather Alert
 
 on:
+  # รันทุก 15 นาที
   schedule:
-    - cron: '*/15 * * * *'   # ทุก 15 นาที
+    - cron: '*/15 * * * *'
+  # ให้สามารถสั่งด้วยมือผ่าน GitHub UI ได้
   workflow_dispatch:
 
 jobs:
@@ -15,7 +17,7 @@ jobs:
         with:
           persist-credentials: true
 
-      - name: Set up Python 3.10
+      - name: Setup Python 3.10
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
@@ -25,34 +27,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run weather forecaster
+      - name: Run weather_forecaster
+        run: python weather_forecaster.py
         env:
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
-        run: |
-          python weather_forecaster.py
-
-      - name: Commit & Push State Files
-        if: always()
-        run: |
-          git config user.email "action@github.com"
-          git config user.name  "GitHub Action"
-
-          # สร้างไฟล์ถ้ายังไม่มี
-          [ -f last_forecast_id.txt ] || echo "NONE" > last_forecast_id.txt
-          [ -f last_alert_time.txt ]  || echo ""     > last_alert_time.txt
-
-          # เขียน timestamp ปัจจุบัน (Asia/Bangkok) ลงไฟล์ทุกครั้ง
-          date '+%Y-%m-%dT%H:%M:%S%:z' > last_alert_time.txt
-
-          # stage ทั้งสองไฟล์
-          git add last_forecast_id.txt last_alert_time.txt
-
-          # commit & push ถ้ามีการเปลี่ยนแปลงใดๆ
-          if ! git diff --cached --quiet; then
-            git commit -m "Update weather alert state files"
-            git push
-          else
-            echo "No changes to commit."
-          fi

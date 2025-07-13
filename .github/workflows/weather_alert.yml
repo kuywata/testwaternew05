@@ -41,15 +41,15 @@ jobs:
           git config user.email "action@github.com"
           git config user.name  "GitHub Action"
 
-          # Ensure the state files exist (creates them on first run)
-          [ -f last_forecast_id.txt ] || touch last_forecast_id.txt
-          [ -f last_alert_time.txt ] || touch last_alert_time.txt
+          # If missing, create each file with one newline so git records it
+          [ -f last_forecast_id.txt ] || echo > last_forecast_id.txt
+          [ -f last_alert_time.txt ]  || echo > last_alert_time.txt
 
           git add last_forecast_id.txt last_alert_time.txt
 
-          # Only commit/push if something changed
+          # Only commit if there’s something new
           if ! git diff --cached --quiet; then
-            git commit -m "Update weather alert status"
+            git commit -m "Initialize or update weather alert state files"
             git push
           else
             echo "No changes to commit."

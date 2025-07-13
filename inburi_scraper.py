@@ -62,6 +62,19 @@ def get_inburi_data_selenium():
             service = Service(ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service, options=chrome_options)
             
+            # --- Added: Set browser language via CDP ---
+            # This ensures that elements with specific language text (like Thai characters) 
+            # are recognized correctly by Selenium.
+            driver.execute_cdp_cmd(
+                "Emulation.setLocaleOverride", 
+                {"locale": "th-TH"}
+            )
+            driver.execute_cdp_cmd(
+                "Network.setExtraHTTPHeaders", 
+                {"headers": {"Accept-Language": "th-TH"}}
+            )
+            # ------------------------------------------
+
             driver.get(URL)
             print(f"Attempt {attempt} opened page successfully.")
 
@@ -83,6 +96,7 @@ def get_inburi_data_selenium():
                 columns = row.find_all('td')
                 if columns and len(columns) >= 7:
                     station_name = columns[1].text.strip()
+                    # We compare against the Thai name for the station
                     if station_name == STATION_NAME_TO_FIND:
                         try:
                             # Extract relevant data

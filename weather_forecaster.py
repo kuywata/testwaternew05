@@ -23,7 +23,6 @@ FORECAST_PERIODS_TO_CHECK = 24     # ตรวจสอบล่วงหน้�
 MAX_LEAD_TIME_HOURS = 6            # พยากรณ์ภายใน 6 ชม.
 ALERT_COOLDOWN_HOURS = 6           # เว้นแจ้งเตือนอย่างน้อย 6 ชม.
 
-
 def get_weather_events():
     """
     ตรวจสอบทั้งฝนหนักและอากาศร้อนจัด
@@ -66,7 +65,6 @@ def get_weather_events():
         print(f"Error in get_weather_events: {e}")
         return None, None
 
-
 def format_message(event_type, f):
     tz = pytz.timezone('Asia/Bangkok')
     dt_bk = datetime.utcfromtimestamp(f['dt']).replace(tzinfo=pytz.UTC).astimezone(tz)
@@ -93,7 +91,6 @@ def format_message(event_type, f):
         )
     return message
 
-
 def send_line_message(msg):
     if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_TARGET_ID:
         print("LINE credentials missing")
@@ -112,7 +109,6 @@ def send_line_message(msg):
         print(f"Error sending LINE: {e}")
         return False
 
-
 def read_file(path):
     return open(path, 'r').read().strip() if os.path.exists(path) else ''
 
@@ -120,13 +116,11 @@ def write_file(path, content):
     with open(path, 'w') as f:
         f.write(content)
 
-
 def main():
     last_id = read_file(LAST_FORECAST_ID_FILE)
     last_alert_time = float(read_file(LAST_ALERT_TIME_FILE) or 0)
 
     event_type, forecast = get_weather_events()
-    # ถ้าไม่มีเหตุการณ์ที่เข้าเกณฑ์ทั้งสอง
     if event_type == 'NO_EVENT':
         print("No rain or heat events detected. No notification sent.")
         return
@@ -153,7 +147,6 @@ def main():
             print("Within cooldown period. No new notification.")
     else:
         print("Event unchanged. No notification.")
-
 
 if __name__ == '__main__':
     scheduler = BlockingScheduler(timezone='Asia/Bangkok')

@@ -1,50 +1,43 @@
-name: Weather Forecast Alert
+name: Weather Alert
 
 on:
-  workflow_dispatch:
   schedule:
-    # รันทุกๆ 15 นาที
-    - cron: '*/15 * * * *'
-
-permissions:
-  contents: write
+    # รันทุก ๆ 1 ชั่วโมง (Bangkok time)
+    - cron:  '0 * * * *'
 
 jobs:
   forecast:
     runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
 
-      - name: Set up Python
+    steps:
+      - name: เช็คเอาท์โค้ด
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: ติดตั้ง Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.x'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+      - name: ติดตั้ง Dependencies
+        run: pip install -r requirements.txt
 
-      - name: Run weather forecast script
+      - name: รัน Weather Forecaster
+        run: python weather_forecaster.py
         env:
+          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
-          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
-        run: python weather_forecaster.py
 
-      - name: Commit and push if changed
+      - name: Commit & Push state files
         run: |
-          # แก้ไขให้เช็คไฟล์ที่ถูกต้อง คือ last_forecast_id.txt
-          if [ -f last_forecast_id.txt ]; then
+          if [ -f last_forecast_id.txt ] || [ -f last_alert_time.txt ]; then
             git config --local user.email "action@github.com"
             git config --local user.name "GitHub Action"
-            git pull
-            # แก้ไขให้เพิ่มไฟล์ที่ถูกต้อง คือ last_forecast_id.txt
-            git add last_forecast_id.txt
-            # แก้ไขข้อความ commit ให้สื่อความหมายมากขึ้น
-            git diff --quiet && git diff --staged --quiet || (git commit -m "Update last forecast status" && git push)
+            git add last_forecast_id.txt last_alert_time.txt
+            git diff --quiet --staged || git commit -m "Update weather alert state"
+            git push
           else
-            # แก้ไขข้อความใน log ให้ตรงกัน
-            echo "last_forecast_id.txt not found, skipping commit."
+            echo "No state files to commit."
           fi

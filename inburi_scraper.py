@@ -11,6 +11,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
+# Import ChromeOptions for headless configuration
+from selenium.webdriver.chrome.options import Options
 
 # --- Constants ---
 URL = "https://singburi.thaiwater.net/wl"
@@ -37,84 +39,91 @@ def send_line_message(message):
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=10)
         if response.status_code != 200:
-            print(f"LINE API error: {response.status_code} {response.text}")
-    except Exception as e:
-        print(f"Error sending LINE message: {e}")
+            print(f"LINE API error: {response.status_code} - {response.text}")
+    except requests.exceptions.RequestException as e:
+        print(f"LINE API request failed: {e}")
 
+def get_inburi_data_selenium():
+    print(f"[Attempt 1] Opening page (timeout=60s): {URL}")
+    
+    # Configure Chrome options for headless mode in CI/CD environment
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox") # Required for CI/CD environments
+    chrome_options.add_argument("--disable-dev-shm-usage") # Recommended for CI/CD environments
 
-def get_inburi_data_selenium(retries: int = 3):
-    """
-    Fetch water level data for the target station with Selenium.
-    Retries up to `retries` times with longer timeouts and implicit waits.
-    """
-    options = webdriver.ChromeOptions()
-    options.add_argument('--headless=new')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument(
-        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/91.0.4472.124 Safari/537.36"
-    )
-
-    for attempt in range(1, retries + 1):
-        driver = webdriver.Chrome(
-            service=Service(ChromeDriverManager().install()),
-            options=options
-        )
-        # Increase page load and lookup timeouts
-        driver.set_page_load_timeout(60)
-        driver.implicitly_wait(10)
-
+    driver = None
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
         try:
-            print(f"[Attempt {attempt}] Opening page (timeout=60s): {URL}")
+            # Initialize the driver with the headless options
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            
             driver.get(URL)
+            print(f"Attempt {attempt} opened page successfully.")
 
+            # Wait for the data table to load (timeout=30s)
             print(f"[Attempt {attempt}] Waiting for data table (timeout=30s)...")
             WebDriverWait(driver, 30).until(
-                EC.presence_of_element_located((By.XPATH, "//table[.//th[contains(text(), 'สถานี')]]"))
+                EC.presence_of_element_located((By.XPATH, "//div[@class='table-responsive']//table"))
             )
-
+            
+            # Find the target station data
             soup = BeautifulSoup(driver.page_source, 'html.parser')
-            table = soup.find(
-                'table',
-                lambda t: t.find('th', string=lambda txt: txt and 'สถานี' in txt)
-            )
-            if not table:
-                print("Data table not found; retrying...")
-                raise TimeoutException()
-
-            # Parse rows looking for our station
-            for row in table.find('tbody').find_all('tr'):
-                cells = row.find_all('td')
-                if len(cells) > 5 and STATION_NAME_TO_FIND in cells[1].get_text(strip=True):
-                    time_str = cells[2].get_text(strip=True)
-                    wl_text = cells[3].get_text(strip=True).replace(',', '')
-                    status_text = cells[4].get_text(strip=True)
-                    diff_text = cells[5].get_text(strip=True).replace(',', '')
-
-                    wl = float(wl_text)
-                    diff = float(diff_text)
-                    print(f"Found station '{STATION_NAME_TO_FIND}': time={time_str}, wl={wl}, status={status_text}, diff={diff}")
-                    return {
-                        'time': time_str,
-                        'water_level': wl,
-                        'status': status_text,
-                        'diff_to_bank': diff
-                    }
-
-            print(f"Station '{STATION_NAME_TO_FIND}' not found in table; retrying...")
-            raise TimeoutException()
+            
+            # Find all rows in the table
+            table_rows = soup.select("table tbody tr")
+            
+            data = None
+            for row in table_rows:
+                # Assuming the columns are consistent: Station Name (col 1), Water Level (col 4), Status (col 6), Diff to Bank (col 7)
+                columns = row.find_all('td')
+                if columns and len(columns) >= 7:
+                    station_name = columns[1].text.strip()
+                    if station_name == STATION_NAME_TO_FIND:
+                        try:
+                            # Extract relevant data
+                            wl_str = columns[4].text.strip()
+                            wl = float(wl_str) if wl_str else None
+                            status = columns[6].text.strip()
+                            diff_str = columns[7].text.strip()
+                            diff_to_bank = float(diff_str) if diff_str else None
+                            
+                            # Find the update time (usually in a separate header or footer, checking common locations)
+                            # This part might need adjustment if the website structure changes.
+                            time_element = soup.find('p', class_='text-muted') # Example of a common time location
+                            time_str = time_element.text.strip() if time_element else "N/A"
+                            
+                            # Clean time string to just the time and date
+                            if "เวลา:" in time_str:
+                                time_str = time_str.replace("ข้อมูล ณ เวลา:", "").strip()
+                            
+                            data = {
+                                "station": station_name,
+                                "water_level": wl,
+                                "status": status,
+                                "diff_to_bank": diff_to_bank,
+                                "time": time_str
+                            }
+                            break
+                        except ValueError as ve:
+                            print(f"Error parsing data for {station_name}: {ve}")
+                            data = None
+            
+            return data
 
         except TimeoutException:
+            print("Attempt 1 timed out or data missing.")
             print(f"Attempt {attempt} timed out or data missing.")
         except Exception as e:
-            print(f"Attempt {attempt} error: {e}")
+            print(f"An error occurred during attempt {attempt}: {e}")
         finally:
-            driver.quit()
-            time.sleep(5)
+            if driver:
+                driver.quit()
 
-    print(f"All {retries} attempts failed to fetch data.")
+    print(f"All {max_attempts} attempts failed to fetch data.")
+    print("Could not retrieve new data in this run.")
     return None
 
 
@@ -152,9 +161,8 @@ if __name__ == '__main__':
 
             send_line_message(message)
             with open(LAST_DATA_FILE, 'w', encoding='utf-8') as f:
-                json.dump(current_data, f, ensure_ascii=False, indent=2)
-            print("Saved new data.")
+                json.dump(current_data, f, ensure_ascii=False, indent=4)
         else:
-            print("No change in data; no notification sent.")
+            print("No new data, skipping notification.")
     else:
         print("Could not retrieve new data in this run.")

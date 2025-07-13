@@ -2,35 +2,35 @@ name: Weather Alert
 
 on:
   schedule:
-    # รันทุก ๆ 1 ชั่วโมง (Bangkok time)
-    - cron:  '0 * * * *'
+    # รันทุกต้นชั่วโมง (Bangkok time)
+    - cron: '0 * * * *'
 
 jobs:
   forecast:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
-      - name: เช็คเอาท์โค้ด
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
           persist-credentials: true
 
-      - name: ติดตั้ง Python
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
 
-      - name: ติดตั้ง Dependencies
+      - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: รัน Weather Forecaster
+      - name: Run weather forecaster
         run: python weather_forecaster.py
         env:
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
 
-      - name: Commit & Push state files
+      - name: Commit & push state files
         run: |
           if [ -f last_forecast_id.txt ] || [ -f last_alert_time.txt ]; then
             git config --local user.email "action@github.com"

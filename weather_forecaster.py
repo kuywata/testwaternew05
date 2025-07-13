@@ -66,13 +66,13 @@ def get_weather_events():
         return None, None
 
 
-def format_message(event_type, f):
+def format_message(event_type, forecast):
     tz = pytz.timezone('Asia/Bangkok')
-    dt_bk = datetime.utcfromtimestamp(f['dt']).replace(tzinfo=pytz.UTC).astimezone(tz)
+    dt_bk = datetime.utcfromtimestamp(forecast['dt']).replace(tzinfo=pytz.UTC).astimezone(tz)
 
     if event_type == 'RAIN':
-        w = f.get('weather', [{}])[0]
-        rain = f.get('rain', {}).get('3h', 0)
+        w = forecast.get('weather', [{}])[0]
+        rain = forecast.get('rain', {}).get('3h', 0)
         icon = '⛈️'
         message = (
             f"{icon} *แจ้งเตือนฝนตกหนัก*\n"
@@ -82,7 +82,7 @@ def format_message(event_type, f):
             f"*เวลา:* {dt_bk.strftime('%H:%M %d/%m/%Y')}"
         )
     else:
-        temp = f.get('main', {}).get('temp_max')
+        temp = forecast.get('main', {}).get('temp_max')
         icon = '🌡️'
         message = (
             f"{icon} *แจ้งเตือนอากาศร้อนจัด*\n"
@@ -133,17 +133,13 @@ def main():
         return
 
     # สร้างรหัสสถานะใหม่
-    if event_type == 'RAIN':
-        value = forecast.get('rain', {}).get('3h', 0)
-    else:
-        value = forecast.get('main', {}).get('temp_max')
+    value = forecast.get('rain', {}).get('3h', 0) if event_type == 'RAIN' else forecast.get('main', {}).get('temp_max')
     current_id = f"{event_type}:{forecast['dt']}:{value}"
     now = time.time()
 
-    # ตรวจสอบเหตุการณ์ใหม่หรือ severity เพิ่ม
-    last_event_type = last_id.split(':')[0] if last_id else None
+    last_event = last_id.split(':')[0] if last_id else None
     if current_id != last_id:
-        if now >= last_alert_time + ALERT_COOLDOWN_HOURS * 3600 or event_type != last_event_type:
+        if now >= last_alert_time + ALERT_COOLDOWN_HOURS * 3600 or event_type != last_event:
             msg = format_message(event_type, forecast)
             if send_line_message(msg):
                 write_file(LAST_ALERT_TIME_FILE, str(now))

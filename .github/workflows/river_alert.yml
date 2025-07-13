@@ -12,8 +12,9 @@ jobs:
     env:
       # ค่าที่ต้องตั้งใน Settings → Secrets ของ repo
       LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-      # ถ้าอยากปรับเกณฑ์แจ้งเตือน เปลี่ยนที่นี่ (หน่วยเมตร)
       NOTIFICATION_THRESHOLD_M: 0.10
+      # ชี้ไปยังไบนารี่ Chromium ที่ติดตั้งบน runner
+      CHROME_BIN: /usr/bin/chromium-browser
 
     steps:
       - name: Checkout code
@@ -24,12 +25,12 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install Python deps
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4 selenium
 
-      - name: Install Chromium (for Selenium)
+      - name: Install Chromium & Chromedriver
         run: |
           sudo apt-get update
           sudo apt-get install -y chromium-browser chromium-chromedriver

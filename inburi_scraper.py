@@ -62,12 +62,11 @@ def get_inburi_data_selenium():
             driver.get(URL)
             print(f"Attempt {attempt} opened page successfully.")
 
-            # Wait for the data table to load (increased timeout to 60s and using visibility check)
-            print(f"[Attempt {attempt}] Waiting for data table (timeout=60s)...")
+            # --- REVISED WAIT STRATEGY ---
+            # Wait for the specific station name (อินทร์บุรี) to be visible within the table.
+            print(f"[Attempt {attempt}] Waiting for '{STATION_NAME_TO_FIND}' data (timeout=60s)...")
             WebDriverWait(driver, 60).until(
-                # Changed from presence_of_element_located to visibility_of_element_located 
-                # and increased timeout to handle dynamic loading of the table data.
-                EC.visibility_of_element_located((By.XPATH, "//div[@class='table-responsive']//table"))
+                EC.visibility_of_element_located((By.XPATH, f"//div[@class='table-responsive']//table//*[contains(text(), '{STATION_NAME_TO_FIND}')]"))
             )
             
             # Find the target station data

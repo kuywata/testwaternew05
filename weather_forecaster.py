@@ -4,7 +4,6 @@ import os
 import time
 from datetime import datetime
 import pytz
-from apscheduler.schedulers.blocking import BlockingScheduler
 
 # --- การตั้งค่าทั่วไป ---
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
@@ -23,10 +22,11 @@ FORECAST_PERIODS_TO_CHECK = 24     # ตรวจสอบล่วงหน้�
 MAX_LEAD_TIME_HOURS = 6            # พยากรณ์ภายใน 6 ชม.
 ALERT_COOLDOWN_HOURS = 6           # เว้นแจ้งเตือนอย่างน้อย 6 ชม.
 
+
 def get_weather_events():
     """
     ตรวจสอบทั้งฝนหนักและอากาศร้อนจัด
-    คืนค่า tuple (event_type, forecast) หรือ ("NO_EVENT", None) หรือ (None, None) on error
+    คืนค่า tuple (event_type, forecast) หรือ ("NO_EVENT", None) หรือ (None, None) เมื่อเกิดข้อผิดพลาด
     """
     if not OPENWEATHER_API_KEY:
         print("OPENWEATHER_API_KEY is not set. Skipping.")
@@ -65,6 +65,7 @@ def get_weather_events():
         print(f"Error in get_weather_events: {e}")
         return None, None
 
+
 def format_message(event_type, f):
     tz = pytz.timezone('Asia/Bangkok')
     dt_bk = datetime.utcfromtimestamp(f['dt']).replace(tzinfo=pytz.UTC).astimezone(tz)
@@ -91,6 +92,7 @@ def format_message(event_type, f):
         )
     return message
 
+
 def send_line_message(msg):
     if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_TARGET_ID:
         print("LINE credentials missing")
@@ -109,12 +111,15 @@ def send_line_message(msg):
         print(f"Error sending LINE: {e}")
         return False
 
+
 def read_file(path):
     return open(path, 'r').read().strip() if os.path.exists(path) else ''
+
 
 def write_file(path, content):
     with open(path, 'w') as f:
         f.write(content)
+
 
 def main():
     last_id = read_file(LAST_FORECAST_ID_FILE)
@@ -148,8 +153,6 @@ def main():
     else:
         print("Event unchanged. No notification.")
 
+
 if __name__ == '__main__':
-    scheduler = BlockingScheduler(timezone='Asia/Bangkok')
-    scheduler.add_job(main, 'interval', hours=1, next_run_time=datetime.now(pytz.timezone('Asia/Bangkok')))
-    print("Scheduler started: ตรวจสภาพอากาศทุก 1 ชั่วโมง...")
-    scheduler.start()
+    main()

@@ -1,5 +1,9 @@
 name: Inburi River Alert
 
+# เปิดสิทธิ์เขียนให้ GITHUB_TOKEN สามารถ push ได้
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
   schedule:
@@ -10,15 +14,18 @@ jobs:
   alert:
     runs-on: ubuntu-latest
     env:
-      # ค่าที่ต้องตั้งใน Settings → Secrets ของ repo
+      # ต้องตั้งใน Settings → Secrets
       LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
       NOTIFICATION_THRESHOLD_M: 0.10
-      # ชี้ไปยังไบนารี่ Chromium ที่ติดตั้งบน runner
+      # ชี้ไปยังไบนารี่ Chromium
       CHROME_BIN: /usr/bin/chromium-browser
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # ให้ใช้ GITHUB_TOKEN ที่มีสิทธิ์เขียน
+          persist-credentials: true
 
       - name: Setup Python 3.10
         uses: actions/setup-python@v4

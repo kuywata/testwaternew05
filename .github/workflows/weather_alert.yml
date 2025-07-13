@@ -4,7 +4,7 @@ name: Weather Forecast Alert
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/15 * * * *'  # ทุก 15 นาที
+    - cron: '*/15 * * * *'  # run every 15 minutes
 
 permissions:
   contents: write
@@ -35,26 +35,22 @@ jobs:
           OPENWEATHER_API_KEY:     ${{ secrets.OPENWEATHER_API_KEY }}
         run: python weather_forecaster.py
 
-      - name: Commit & push updated state files
+      - name: Commit & Push State Files
         if: always()
         run: |
-          # only commit if either file exists & changed
           git config user.email "action@github.com"
           git config user.name  "GitHub Action"
-          git pull --rebase
 
-          files=""
-          [ -f last_forecast_id.txt ] && files="$files last_forecast_id.txt"
-          [ -f last_alert_time.txt ] && files="$files last_alert_time.txt"
+          # Ensure the state files exist (creates them on first run)
+          [ -f last_forecast_id.txt ] || touch last_forecast_id.txt
+          [ -f last_alert_time.txt ] || touch last_alert_time.txt
 
-          if [ -n "$files" ]; then
-            git add $files
-            if ! git diff --cached --quiet; then
-              git commit -m "Update weather alert status"
-              git push
-            else
-              echo "No changes to commit."
-            fi
+          git add last_forecast_id.txt last_alert_time.txt
+
+          # Only commit/push if something changed
+          if ! git diff --cached --quiet; then
+            git commit -m "Update weather alert status"
+            git push
           else
-            echo "No state files present; skipping."
+            echo "No changes to commit."
           fi

@@ -50,6 +50,7 @@ def get_inburi_data_selenium():
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox") # Required for CI/CD environments
     chrome_options.add_argument("--disable-dev-shm-usage") # Recommended for CI/CD environments
+    chrome_options.add_argument("--window-size=1920,1080") # Set window size for consistent rendering
     # Specify Google Chrome binary location
     chrome_options.binary_location = "/usr/bin/google-chrome" 
 
@@ -116,6 +117,11 @@ def get_inburi_data_selenium():
 
         except TimeoutException:
             print(f"Attempt {attempt} timed out or data missing.")
+            # Debugging: Print page source if timeout occurs to see what was loaded
+            if driver:
+                print("--- Page Source on Timeout ---")
+                print(driver.page_source)
+                print("------------------------------")
         except Exception as e:
             print(f"An error occurred during attempt {attempt}: {e}")
         finally:

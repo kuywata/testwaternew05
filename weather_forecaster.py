@@ -1,147 +1,174 @@
+# weather_forecaster.py
 import requests
-import json
 import os
 import time
 from datetime import datetime
 import pytz
 
-# --- การตั้งค่าทั่วไป ---
-LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
-LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
-OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY')
-IN_BURI_LAT = 15.02
-IN_BURI_LON = 100.34
+# --- General settings ---
+LINE_CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
+LINE_TARGET_ID = os.getenv('LINE_TARGET_ID')
+OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY')
+
+# Coordinates for In Buri, Singburi
+LATITUDE = 15.02
+LONGITUDE = 100.34
+
+# State files
 LAST_FORECAST_ID_FILE = 'last_forecast_id.txt'
 LAST_ALERT_TIME_FILE = 'last_alert_time.txt'
 
-# --- 🎯 การตั้งค่าการแจ้งเตือน ---
-RAIN_CONFIDENCE_THRESHOLD = 0.3    # ความน่าจะเป็นฝน ≥ 30%
-MIN_RAIN_VOLUME_MM = 10.0          # ฝน ≥ 10 มม.
-HEAT_TEMP_THRESHOLD = 35.0         # อุณหภูมิสูงสุด ≥ 35°C
-FORECAST_PERIODS_TO_CHECK = 24     # ตรวจสอบล่วงหน้า 24 ชั่วโมง
-MAX_LEAD_TIME_HOURS = 6            # พยากรณ์ภายใน 6 ชม.
-ALERT_COOLDOWN_HOURS = 6           # เว้นแจ้งเตือนอย่างน้อย 6 ชม.
+# Alert thresholds
+RAIN_CONF_THRESHOLD = 0.3    # ≥30% chance
+MIN_RAIN_MM = 10.0           # ≥10 mm in 3 h
+HEAT_THRESHOLD = 35.0        # ≥35 °C
+LOOKAHEAD_PERIODS = 24       # forecast entries to fetch
+MAX_LEAD_HOURS = 6           # only consider next 6 h
+COOLDOWN_HOURS = 6           # wait at least 6 h between same-event alerts
 
-def get_weather_events():
-    """
-    ตรวจสอบทั้งฝนหนักและอากาศร้อนจัด
-    คืนค่า tuple (event_type, forecast) หรือ ("NO_EVENT", None) หรือ (None, None) เมื่อเกิดข้อผิดพลาด
-    """
+
+def get_weather_event():
+    """Fetch forecast and return ('RAIN' or 'HEAT', forecast_dict),
+       or ('NO_EVENT', None), or (None, None) on error."""
     if not OPENWEATHER_API_KEY:
-        print("OPENWEATHER_API_KEY is not set. Skipping.")
+        print("OPENWEATHER_API_KEY missing, skipping.")
         return None, None
 
-    now_unix = int(time.time())
+    now = int(time.time())
     url = (
-        f"https://api.openweathermap.org/data/2.5/forecast?lat={IN_BURI_LAT}&lon={IN_BURI_LON}"
-        f"&appid={OPENWEATHER_API_KEY}&units=metric&lang=th&cnt={FORECAST_PERIODS_TO_CHECK}"
+        f'https://api.openweathermap.org/data/2.5/forecast'
+        f'?lat={LATITUDE}&lon={LONGITUDE}'
+        f'&appid={OPENWEATHER_API_KEY}&units=metric'
+        f'&cnt={LOOKAHEAD_PERIODS}&lang=th'
     )
 
     try:
-        response = requests.get(url, timeout=15)
-        response.raise_for_status()
-        forecast_list = response.json().get('list', [])
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        data = resp.json().get('list', [])
 
-        for f in forecast_list:
-            # ข้ามช่วงที่อยู่นอก lead time
-            if f['dt'] > now_unix + MAX_LEAD_TIME_HOURS * 3600:
+        for entry in data:
+            dt = entry['dt']
+            if dt > now + MAX_LEAD_HOURS * 3600:
                 continue
 
-            # ตรวจฝนหนัก
-            wid = str(f.get('weather', [{}])[0].get('id', ''))
-            pop = f.get('pop', 0)
-            rain = f.get('rain', {}).get('3h', 0)
-            if (wid.startswith('5') or wid.startswith('2')) and pop >= RAIN_CONFIDENCE_THRESHOLD and rain >= MIN_RAIN_VOLUME_MM:
-                return 'RAIN', f
+            # Heavy rain?
+            pop = entry.get('pop', 0)
+            rain_vol = entry.get('rain', {}).get('3h', 0)
+            wid = str(entry.get('weather', [{}])[0].get('id', ''))
+            if (wid.startswith('5') or wid.startswith('2')) \
+               and pop >= RAIN_CONF_THRESHOLD and rain_vol >= MIN_RAIN_MM:
+                return 'RAIN', entry
 
-            # ตรวจอากาศร้อนจัด
-            temp_max = f.get('main', {}).get('temp_max')
-            if temp_max is not None and temp_max >= HEAT_TEMP_THRESHOLD:
-                return 'HEAT', f
+            # Heat wave?
+            tmax = entry.get('main', {}).get('temp_max')
+            if tmax is not None and tmax >= HEAT_THRESHOLD:
+                return 'HEAT', entry
 
         return 'NO_EVENT', None
+
     except Exception as e:
-        print(f"Error in get_weather_events: {e}")
+        print(f"Error fetching forecast: {e}")
         return None, None
 
-def format_message(event_type, forecast):
-    tz = pytz.timezone('Asia/Bangkok')
-    dt_bk = datetime.utcfromtimestamp(forecast['dt']).replace(tzinfo=pytz.UTC).astimezone(tz)
-
-    if event_type == 'RAIN':
-        w = forecast.get('weather', [{}])[0]
-        rain = forecast.get('rain', {}).get('3h', 0)
-        icon = '⛈️'
-        message = (
-            f"{icon} *แจ้งเตือนฝนตกหนัก*\n"
-            f"*พื้นที่:* อ.อินทร์บุรี, สิงห์บุรี\n"
-            f"*สภาพ:* {w.get('description','N/A')}\n"
-            f"*ฝน:* ~{rain:.1f} mm\n"
-            f"*เวลา:* {dt_bk.strftime('%H:%M %d/%m/%Y')}"
-        )
-    else:
-        temp = forecast.get('main', {}).get('temp_max')
-        icon = '🌡️'
-        message = (
-            f"{icon} *แจ้งเตือนอากาศร้อนจัด*\n"
-            f"*พื้นที่:* อ.อินทร์บุรี, สิงห์บุรี\n"
-            f"*อุณหภูมิสูงสุด:* {temp:.1f} °C\n"
-            f"*เวลา:* {dt_bk.strftime('%H:%M %d/%m/%Y')}"
-        )
-    return message
-
-def send_line_message(msg):
-    if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_TARGET_ID:
-        print("LINE credentials missing")
-        return False
-    ts = datetime.now(pytz.timezone('Asia/Bangkok')).strftime('%d/%m/%Y %H:%M:%S')
-    payload = {'to': LINE_TARGET_ID, 'messages': [{'type':'text', 'text':f"{msg}\nอัปเดต: {ts}"}]}
-    try:
-        r = requests.post(
-            'https://api.line.me/v2/bot/message/push',
-            headers={'Content-Type':'application/json', 'Authorization':f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'},
-            json=payload, timeout=10
-        )
-        r.raise_for_status()
-        return True
-    except Exception as e:
-        print(f"Error sending LINE: {e}")
-        return False
 
 def read_file(path):
-    return open(path, 'r').read().strip() if os.path.exists(path) else ''
+    """Return content or empty string if missing."""
+    return open(path).read().strip() if os.path.exists(path) else ''
+
 
 def write_file(path, content):
     with open(path, 'w') as f:
-        f.write(content)
+        f.write(str(content))
+
+
+def format_message(event, forecast):
+    tz = pytz.timezone('Asia/Bangkok')
+    dt_local = datetime.utcfromtimestamp(forecast['dt']) \
+                   .replace(tzinfo=pytz.UTC) \
+                   .astimezone(tz) \
+                   .strftime('%H:%M %d/%m/%Y')
+
+    if event == 'RAIN':
+        desc = forecast['weather'][0].get('description', 'N/A')
+        rain_mm = forecast.get('rain', {}).get('3h', 0)
+        return (
+            f"⛈️ *แจ้งเตือนฝนตกหนัก*\n"
+            f"*พื้นที่:* อ.อินทร์บุรี, จ.สิงห์บุรี\n"
+            f"*สภาพ:* {desc}\n"
+            f"*ปริมาณฝน:* ~{rain_mm:.1f} มม.\n"
+            f"*เวลา:* {dt_local}"
+        )
+
+    # HEAT
+    tmax = forecast['main'].get('temp_max')
+    return (
+        f"🌡️ *แจ้งเตือนอากาศร้อนจัด*\n"
+        f"*พื้นที่:* อ.อินทร์บุรี, จ.สิงห์บุรี\n"
+        f"*อุณหภูมิสูงสุด:* {tmax:.1f} °C\n"
+        f"*เวลา:* {dt_local}"
+    )
+
+
+def send_line(msg):
+    if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_TARGET_ID:
+        print("LINE credentials missing.")
+        return False
+
+    timestamp = datetime.now(pytz.timezone('Asia/Bangkok')) \
+                     .strftime('%d/%m/%Y %H:%M:%S')
+    payload = {
+        'to': LINE_TARGET_ID,
+        'messages': [{'type': 'text', 'text': f"{msg}\n\nอัปเดต: {timestamp}"}]
+    }
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'
+    }
+    try:
+        r = requests.post('https://api.line.me/v2/bot/message/push',
+                          headers=headers, json=payload, timeout=10)
+        r.raise_for_status()
+        return True
+    except Exception as e:
+        print(f"LINE send error: {e}")
+        return False
+
 
 def main():
     last_id = read_file(LAST_FORECAST_ID_FILE)
-    last_alert_time = float(read_file(LAST_ALERT_TIME_FILE) or 0)
+    last_alert = float(read_file(LAST_ALERT_TIME_FILE) or 0)
 
-    event_type, forecast = get_weather_events()
-    if event_type == 'NO_EVENT':
-        print("No rain or heat events detected. No notification sent.")
+    event, forecast = get_weather_event()
+    if event == 'NO_EVENT':
+        print("No relevant weather event.")
         return
-    if event_type is None:
+    if event is None:
         return
 
-    # สร้างรหัสสถานะใหม่
-    value = forecast.get('rain', {}).get('3h', 0) if event_type == 'RAIN' else forecast.get('main', {}).get('temp_max')
-    current_id = f"{event_type}:{forecast['dt']}:{value}"
+    # Build a new unique ID
+    value = (forecast.get('rain', {}).get('3h', 0)
+             if event == 'RAIN'
+             else forecast['main'].get('temp_max'))
+    curr_id = f"{event}:{forecast['dt']}:{value}"
     now = time.time()
 
-    last_event = last_id.split(':')[0] if last_id else None
-    if current_id != last_id:
-        if now >= last_alert_time + ALERT_COOLDOWN_HOURS * 3600 or event_type != last_event:
-            msg = format_message(event_type, forecast)
-            if send_line_message(msg):
-                write_file(LAST_ALERT_TIME_FILE, str(now))
-                write_file(LAST_FORECAST_ID_FILE, current_id)
-        else:
-            print("Within cooldown period. No new notification.")
-    else:
-        print("Event unchanged. No notification.")
+    prev_event = last_id.split(':')[0] if last_id else None
 
-if __name__ == '__main__':
+    if curr_id != last_id:
+        if now >= last_alert + COOLDOWN_HOURS * 3600 or event != prev_event:
+            msg = format_message(event, forecast)
+            if send_line(msg):
+                write_file(LAST_ALERT_TIME_FILE, now)
+                write_file(LAST_FORECAST_ID_FILE, curr_id)
+                print("Alert sent and state updated.")
+            else:
+                print("Failed to send alert.")
+        else:
+            print("In cooldown; no alert.")
+    else:
+        print("Event unchanged; no alert.")
+
+
+if __name__ == "__main__":
     main()

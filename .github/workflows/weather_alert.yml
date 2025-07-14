@@ -3,7 +3,7 @@ name: Weather Alert
 on:
   # รันทุก 15 นาที
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '0 * * * *'
   # ให้สามารถสั่งด้วยมือผ่าน GitHub UI ได้
   workflow_dispatch:
 

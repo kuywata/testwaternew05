@@ -2,15 +2,18 @@ import os
 import json
 import time
 import requests
+import shutil
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 
-# --- ส่วนนี้เหมือนเดิม ---
+# --- Constants and configuration ---
 DATA_FILE = "inburi_bridge_data.json"
 NOTIFICATION_THRESHOLD = float(os.getenv("NOTIFICATION_THRESHOLD_M", "0.10"))
 LINE_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 
+# --- LINE notification ---
 def send_line_message(message: str):
     if not LINE_ACCESS_TOKEN:
         print("--> ❌ LINE_CHANNEL_ACCESS_TOKEN ไม่ถูกตั้งค่า!")
@@ -30,16 +33,40 @@ def send_line_message(message: str):
     except Exception as e:
         print(f"--> ❌ Exception when sending LINE: {e}")
 
+# --- WebDriver setup ---
 def setup_driver():
     chrome_options = Options()
-    chrome_bin = os.getenv("CHROME_BIN", "/usr/bin/chromium-browser")
+    # Determine Chrome/Chromium binary location
+    chrome_bin = os.getenv("CHROME_BIN")
+    if not chrome_bin:
+        # try common binaries
+        chrome_bin = (
+            shutil.which("chromium-browser") or
+            shutil.which("chromium") or
+            shutil.which("google-chrome") or
+            "/usr/bin/google-chrome"
+        )
     chrome_options.binary_location = chrome_bin
+    # headless mode arguments
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    driver = webdriver.Chrome(options=chrome_options)
+    chrome_options.add_argument("--disable-gpu")
+
+    # Determine chromedriver path
+    chromedriver_path = (
+        shutil.which("chromedriver") or
+        os.getenv("CHROMEDRIVER_PATH")
+    )
+    if chromedriver_path:
+        service = Service(chromedriver_path)
+    else:
+        service = Service()
+
+    driver = webdriver.Chrome(service=service, options=chrome_options)
     return driver
 
+# --- Data extraction ---
 def get_water_data():
     driver = setup_driver()
     try:
@@ -51,7 +78,8 @@ def get_water_data():
             th = row.find("th")
             if th and "อินทร์บุรี" in th.text:
                 tds = row.find_all("td")
-                if len(tds) < 8: continue
+                if len(tds) < 8:
+                    continue
                 return {
                     "station_name": th.text.strip(),
                     "water_level": float(tds[1].text.strip()),
@@ -68,7 +96,7 @@ def get_water_data():
     finally:
         driver.quit()
 
-# --- ส่วนนี้เหมือนเดิม ---
+# --- Main workflow ---
 def main():
     print("--- เริ่มทำงาน inburi_bridge_alert.py ---")
     last_data = {}
@@ -76,6 +104,7 @@ def main():
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             last_data = json.load(f)
             print(f"โหลดข้อมูลเก่า: {last_data}")
+
     data = get_water_data()
     if not data:
         print("--> ไม่มีข้อมูลใหม่, จบการทำงาน")
@@ -91,43 +120,35 @@ def main():
         if diff >= NOTIFICATION_THRESHOLD:
             notify = True
             reasons.append(f"ระดับน้ำเปลี่ยน {diff*100:.0f} ซม.")
-        last_crit = any(k in last_data.get("status","") for k in ["สูง","ล้น","วิกฤต"])
-        curr_crit = any(k in data["status"] for k in ["สูง","ล้น","วิกฤต"])
+        last_crit = any(k in last_data.get("status", "") for k in ["สูง", "ล้น", "วิกฤต"])
+        curr_crit = any(k in data["status"] for k in ["สูง", "ล้น", "วิกฤต"])
         if curr_crit and not last_crit:
             notify = True
             reasons.append("สถานะเปลี่ยนเป็นวิกฤต")
+
     if not reasons:
         reasons.append("การเปลี่ยนแปลงไม่ถึงเกณฑ์")
 
     print("ผลการเช็ค:", reasons)
 
     if notify:
-        # --- ############################################################### ---
-        # --- ### ส่วนที่แก้ไข: เพิ่มการแสดงระดับน้ำเดิมและปรับรูปแบบ ### ---
-        # --- ############################################################### ---
-        
-        is_critical = any(k in data["status"] for k in ["สูง","ล้น","วิกฤต"])
-        
-        if is_critical:
-            icon = "🚨"
-            summary_text = f"สูงกว่าตลิ่งอยู่ *{abs(data['below_bank']):.2f}* ม."
-        else:
-            icon = "✅"
-            summary_text = f"ต่ำกว่าตลิ่งอยู่ *{data['below_bank']:.2f}* ม."
-        
-        # สร้างข้อความเปรียบเทียบและแนวโน้ม
+        is_critical = any(k in data["status"] for k in ["สูง", "ล้น", "วิกฤต"])
+        icon = "🚨" if is_critical else "✅"
+        summary_text = (
+            f"สูงกว่าตลิ่งอยู่ *{abs(data['below_bank']):.2f}* ม." if is_critical
+            else f"ต่ำกว่าตลิ่งอยู่ *{data['below_bank']:.2f}* ม."
+        )
+
         comparison_text = ""
         if "water_level" in last_data:
             level_diff = data["water_level"] - last_data["water_level"]
             trend_icon = "📈" if level_diff > 0 else "📉" if level_diff < 0 else "↔️"
             trend_sign = "+" if level_diff > 0 else ""
-            
             comparison_text = (
                 f"⬅️ ระดับน้ำเดิม: *{last_data['water_level']:.2f}* ม.รทก.\n\n"
                 f"{trend_icon} แนวโน้ม: *น้ำ{'ขึ้น' if level_diff > 0 else 'ลง' if level_diff < 0 else 'คงที่'}* ({trend_sign}{level_diff:.2f} ม.)"
             )
-        
-        # สร้างข้อความฉบับสมบูรณ์
+
         message = (
             f"💧 **รายงานระดับน้ำ**\n"
             f"📍 สถานี: {data['station_name']}\n"

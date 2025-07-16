@@ -20,6 +20,8 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # เพิ่มตัวแปร CHROME_BIN เพื่อระบุพาธของ Chromium
       CHROME_BIN: /usr/bin/chromium-browser
+      # เพิ่ม LINE_CHANNEL_ACCESS_TOKEN ตรงนี้เพื่อส่งค่าให้สคริปต์ Python
+      LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }} # <--- เพิ่มบรรทัดนี้
 
     steps:
       # ขั้นตอนที่ 1: เช็คเอาท์โค้ดจาก repo มาไว้บน runner

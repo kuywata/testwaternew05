@@ -21,7 +21,7 @@ jobs:
       # เพิ่มตัวแปร CHROME_BIN เพื่อระบุพาธของ Chromium
       CHROME_BIN: /usr/bin/chromium-browser
       # เพิ่ม LINE_CHANNEL_ACCESS_TOKEN ตรงนี้เพื่อส่งค่าให้สคริปต์ Python
-      LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }} # <--- เพิ่มบรรทัดนี้
+      LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
 
     steps:
       # ขั้นตอนที่ 1: เช็คเอาท์โค้ดจาก repo มาไว้บน runner
@@ -37,6 +37,12 @@ jobs:
       # ขั้นตอนที่ 3: ติดตั้ง dependencies (apt-get + pip)
       - name: Install dependencies
         run: |
+          # เพิ่มบรรทัดเหล่านี้เพื่อจัดการกับปัญหา apt lock
+          sudo rm -f /var/lib/dpkg/lock-frontend
+          sudo rm -f /var/lib/dpkg/lock
+          sudo rm -f /var/cache/apt/archives/lock
+          sudo dpkg --configure -a
+          
           sudo apt-get update
           sudo apt-get install -y chromium-browser chromium-chromedriver
           # ไม่ต้องสร้าง symbolic link แล้ว เนื่องจากใน Python script มีการระบุ binary_location โดยตรง

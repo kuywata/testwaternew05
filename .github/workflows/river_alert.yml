@@ -18,6 +18,8 @@ jobs:
     # กำหนดตัวแปรแวดล้อมที่ใช้ในสคริปต์
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # เพิ่มตัวแปร CHROME_BIN เพื่อระบุพาธของ Chromium
+      CHROME_BIN: /usr/bin/chromium-browser
 
     steps:
       # ขั้นตอนที่ 1: เช็คเอาท์โค้ดจาก repo มาไว้บน runner
@@ -35,6 +37,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y chromium-browser chromium-chromedriver
+          # ไม่ต้องสร้าง symbolic link แล้ว เนื่องจากใน Python script มีการระบุ binary_location โดยตรง
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       # ขั้นตอนที่ 4: รันสคริปต์ตรวจระดับน้ำ

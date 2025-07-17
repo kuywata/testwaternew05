@@ -20,7 +20,6 @@ except ValueError:
 
 LINE_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 
-
 def send_line_message(message: str):
     if not LINE_ACCESS_TOKEN:
         print("--> ❌ LINE_CHANNEL_ACCESS_TOKEN ไม่ถูกตั้งค่า!")
@@ -38,17 +37,15 @@ def send_line_message(message: str):
     if resp.status_code != 200:
         print(f"--> ❌ ส่ง LINE ไม่สำเร็จ: {resp.status_code} {resp.text}")
 
-
 def setup_driver():
     chrome_options = Options()
-    chrome_options.binary_location = "/usr/bin/google-chrome"
+    chrome_options.binary_location = os.getenv("CHROME_BIN", "/usr/bin/google-chrome")
     chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
 
-    service = Service(executable_path="/usr/bin/chromedriver")
+    service = Service(executable_path=os.getenv("CHROMEDRIVER_PATH", "/usr/bin/chromedriver"))
     return webdriver.Chrome(service=service, options=chrome_options)
-
 
 def get_water_data():
     driver = setup_driver()
@@ -82,7 +79,6 @@ def get_water_data():
         return None
     finally:
         driver.quit()
-
 
 def main():
     try:
@@ -118,9 +114,10 @@ def main():
 
         print("--- จบ script ---")
     except Exception as e:
-        print(f"--> ❌ เกิดข้อผิดพลาด: {e}")
+        import traceback
+        print("❌ เกิดข้อผิดพลาด:", e)
+        traceback.print_exc()
         raise
-
 
 if __name__ == "__main__":
     main()

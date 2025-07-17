@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   schedule:
     # ตรวจสอบทุก 5 นาที (ยังคงเหมือนเดิม)
-    - cron: '*/5 * * * *'
+    - cron: '*/8 * * * *'
 
 permissions:
   contents: write

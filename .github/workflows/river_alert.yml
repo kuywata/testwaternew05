@@ -1,51 +1,54 @@
-name: Check In Buri River Level
+name: Inburi River Alert
 
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: '15 * * * *'
-
+# เปิดสิทธิ์ให้ GITHUB_TOKEN สามารถ push ไฟล์กลับขึ้น repo ได้
 permissions:
   contents: write
 
-jobs:
-  scrape:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+# ทริกเกอร์ด้วย manual dispatch และ schedule ทุก 15 นาที
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'
 
-      - name: Set up Python
+jobs:
+  alert:
+    # ใช้ GitHub-hosted runner (ไม่ต้องติดตั้งเอง)
+    runs-on: ubuntu-latest
+
+    # กำหนดตัวแปรแวดล้อมที่ใช้ในสคริปต์
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      # ขั้นตอนที่ 1: เช็คเอาท์โค้ดจาก repo มาไว้บน runner
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # ขั้นตอนที่ 2: ติดตั้ง Python (ปรับเวอร์ชันตามสคริปต์ได้)
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.x'
 
-      # --- ส่วนที่เพิ่มเข้ามาสำหรับ Selenium ---
-      - name: Install Google Chrome
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
-      # --- จบส่วนที่เพิ่ม ---
-
+      # ขั้นตอนที่ 3: ติดตั้ง dependencies (apt-get + pip)
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser chromium-chromedriver
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Run In Buri scraper script
-        env:
-          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-          LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
-        run: python inburi_scraper.py
+      # ขั้นตอนที่ 4: รันสคริปต์ตรวจระดับน้ำ
+      - name: Run alert script
+        run: python inburi_bridge_alert.py
 
-      - name: Commit and push if changed
+      # ขั้นตอนที่ 5: คอมมิตไฟล์ข้อมูลกลับขึ้น repo หากมีการเปลี่ยนแปลง
+      - name: Commit updated data file
         run: |
-          if [ -f last_inburi_data.txt ]; then
-            git config --local user.email "action@github.com"
-            git config --local user.name "GitHub Action"
-            git pull
-            git add last_inburi_data.txt
-            git diff --quiet && git diff --staged --quiet || (git commit -m "Update In Buri river data" && git push)
-          else
-            echo "last_inburi_data.txt not found, skipping commit."
-          fi
+          git config --local user.name  "GitHub Action"
+          git config --local user.email "action@github.com"
+          git add inburi_bridge_data.json
+          # ถ้าไฟล์เปลี่ยนจริงๆ ให้ commit+push
+          git diff --staged --quiet || (
+            git commit -m "Update river level data"
+            git push
+          )

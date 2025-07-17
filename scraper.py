@@ -116,7 +116,8 @@ def main():
         historical_text = ""
         if historical_data:
             last_year_date_str = last_year_date.strftime("%d/%m/%Y")
-            historical_text = f"\n\nเทียบกับปีที่แล้ว ({last_year_date_str})\nค่าน้ำอยู่ที่: `{historical_data}`"
+            # บรรทัดใหม่ (เอา ` ออก)
+            historical_text = f"\n\nเทียบกับปีที่แล้ว ({last_year_date_str})\nค่าน้ำอยู่ที่: {historical_data}"
         else:
             print("Historical data not found for last year.")
         

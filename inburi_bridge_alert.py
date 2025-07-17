@@ -1,92 +1,154 @@
 import os
 import json
+import time
 import requests
-from datetime import datetime, timedelta
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 
-# --- ค่าคงที่ ---
+# --- ส่วนนี้เหมือนเดิม ---
 DATA_FILE = "inburi_bridge_data.json"
+NOTIFICATION_THRESHOLD = float(os.getenv("NOTIFICATION_THRESHOLD_M", "0.10"))
 LINE_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
-LINE_API_URL = "https://api.line.me/v2/bot/message/broadcast"
-NOTIFICATION_THRESHOLD = 0.01 # แจ้งเตือนเมื่อระดับน้ำเปลี่ยนเกิน 1 ซม.
-API_URL = "https://api-v3.thaiwater.net/api/v1/tele/station/C.2"
 
-def load_last_data():
-    """โหลดข้อมูลที่บันทึกไว้ล่าสุดจากไฟล์ JSON"""
+def send_line_message(message: str):
+    if not LINE_ACCESS_TOKEN:
+        print("--> ❌ LINE_CHANNEL_ACCESS_TOKEN ไม่ถูกตั้งค่า!")
+        return
+    url = "https://api.line.me/v2/bot/message/broadcast"
+    headers = {
+        "Authorization": f"Bearer {LINE_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {"messages": [{"type": "text", "text": message}]}
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=10)
+        if resp.status_code == 200:
+            print("--> ✅ ส่ง LINE สำเร็จ")
+        else:
+            print(f"--> ❌ LINE API error: {resp.status_code} {resp.text}")
+    except Exception as e:
+        print(f"--> ❌ Exception when sending LINE: {e}")
+
+def setup_driver():
+    chrome_options = Options()
+    chrome_bin = os.getenv("CHROME_BIN", "/usr/bin/chromium-browser")
+    chrome_options.binary_location = chrome_bin
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    driver = webdriver.Chrome(options=chrome_options)
+    return driver
+
+def get_water_data():
+    driver = setup_driver()
+    try:
+        driver.get("https://singburi.thaiwater.net/wl")
+        print("--> รอโหลดหน้าเว็บ 7 วินาที...")
+        time.sleep(7)
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+        for row in soup.find_all("tr"):
+            th = row.find("th")
+            if th and "อินทร์บุรี" in th.text:
+                tds = row.find_all("td")
+                if len(tds) < 8: continue
+                return {
+                    "station_name": th.text.strip(),
+                    "water_level": float(tds[1].text.strip()),
+                    "bank_level": float(tds[2].text.strip()),
+                    "status": tds[3].text.strip(),
+                    "below_bank": float(tds[4].find_all("div")[1].text.strip()),
+                    "time": tds[6].text.strip()
+                }
+        print("--> ❌ ไม่พบสถานี 'อินทร์บุรี' ในตาราง")
+        return None
+    except Exception as e:
+        print(f"--> ❌ Error ดึงข้อมูล: {e}")
+        return None
+    finally:
+        driver.quit()
+
+# --- ส่วนนี้เหมือนเดิม ---
+def main():
+    print("--- เริ่มทำงาน inburi_bridge_alert.py ---")
+    last_data = {}
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+            last_data = json.load(f)
+            print(f"โหลดข้อมูลเก่า: {last_data}")
+    data = get_water_data()
+    if not data:
+        print("--> ไม่มีข้อมูลใหม่, จบการทำงาน")
+        return
 
-def fetch_data():
-    """ดึงข้อมูลล่าสุดจาก API ของ ThaiWater"""
-    try:
-        response = requests.get(API_URL, timeout=20)
-        response.raise_for_status()
-        api_data = response.json().get("data", [{}])[0].get("tele_station_waterlevel", {})
-        if not api_data:
-            print("--> ERROR: ไม่พบข้อมูล waterlevel ใน API response")
-            return None
-        water_level = float(api_data.get("storage_waterlevel", 0.0))
-        bank_level = float(api_data.get("ground_waterlevel", 0.0))
-        timestamp_str = api_data.get("storage_datetime")
-        status = api_data.get("waterlevel_status", {}).get("waterlevel_status_name", "N/A")
-        dt_object_utc = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-        bkk_time = dt_object_utc + timedelta(hours=7)
-        return {
-            "station_name": "สถานีอินทร์บุรี (C.2)",
-            "water_level": water_level,
-            "bank_level": bank_level,
-            "below_bank": bank_level - water_level,
-            "status": status,
-            "time": bkk_time.strftime('%Y-%m-%d %H:%M:%S')
-        }
-    except Exception as e:
-        print(f"--> ERROR fetching data: {e}")
-        return None
+    notify = False
+    reasons = []
+    if "water_level" not in last_data:
+        notify = True
+        reasons.append("แจ้งครั้งแรก")
+    else:
+        diff = abs(data["water_level"] - last_data["water_level"])
+        if diff >= NOTIFICATION_THRESHOLD:
+            notify = True
+            reasons.append(f"ระดับน้ำเปลี่ยน {diff*100:.0f} ซม.")
+        last_crit = any(k in last_data.get("status","") for k in ["สูง","ล้น","วิกฤต"])
+        curr_crit = any(k in data["status"] for k in ["สูง","ล้น","วิกฤต"])
+        if curr_crit and not last_crit:
+            notify = True
+            reasons.append("สถานะเปลี่ยนเป็นวิกฤต")
+    if not reasons:
+        reasons.append("การเปลี่ยนแปลงไม่ถึงเกณฑ์")
 
-def send_line_message(text):
-    """ส่งข้อความแจ้งเตือนไปที่ LINE"""
-    if not LINE_ACCESS_TOKEN:
-        print("--> SKIPPING LINE: No Access Token.")
-        return
-    headers = {"Authorization": f"Bearer {LINE_ACCESS_TOKEN}", "Content-Type": "application/json"}
-    payload = {"messages": [{"type": "text", "text": text}]}
-    try:
-        requests.post(LINE_API_URL, headers=headers, json=payload, timeout=10)
-        print("--> LINE message sent successfully.")
-    except Exception as e:
-        print(f"--> ERROR sending LINE message: {e}")
+    print("ผลการเช็ค:", reasons)
 
-def main():
-    print("--- Running Water Level Checker (API Final Version) ---")
-    last_data = load_last_data()
-    print(f"Old Level: {last_data.get('water_level', 'None')}")
-    current_data = fetch_data()
-    if not current_data:
-        print("--- EXIT: Failed to fetch new data. ---")
-        return
-    print(f"New Level: {current_data['water_level']}")
-    with open(DATA_FILE, 'w', encoding='utf-8') as f:
-        json.dump(current_data, f, ensure_ascii=False, indent=2)
-    if not last_data:
-        print("--> First run, data saved. No notification will be sent.")
-        return
-    diff = current_data["water_level"] - last_data.get("water_level", 0.0)
-    if abs(diff) < NOTIFICATION_THRESHOLD:
-        print(f"--> Change ({diff:.3f}m) is below threshold. No notification needed.")
-        return
-    trend_text = "น้ำขึ้น" if diff > 0 else "น้ำลง"
-    status_emoji = '🔴' if 'ล้นตลิ่ง' in current_data['status'] else '⚠️' if 'เฝ้าระวัง' in current_data['status'] else '✅'
-    message = (
-        f"💧 แจ้งเตือนระดับน้ำ {current_data['station_name']}\n\n"
-        f"🌊 ระดับปัจจุบัน: {current_data['water_level']:.2f} ม.รทก.\n"
-        f" (เปลี่ยนแปลง {diff:+.2f} ม. - {trend_text})\n\n"
-        f"📊 สถานะ: {status_emoji} {current_data['status']}\n\n"
-        f"⏰ เวลา: {current_data['time']}"
-    )
-    print("--- Significant change detected! Sending LINE message. ---")
-    send_line_message(message)
-    print("--- Script finished successfully. ---")
+    if notify:
+        # --- ############################################################### ---
+        # --- ### ส่วนที่แก้ไข: เพิ่มการแสดงระดับน้ำเดิมและปรับรูปแบบ ### ---
+        # --- ############################################################### ---
+        
+        is_critical = any(k in data["status"] for k in ["สูง","ล้น","วิกฤต"])
+        
+        if is_critical:
+            icon = "🚨"
+            summary_text = f"สูงกว่าตลิ่งอยู่ *{abs(data['below_bank']):.2f}* ม."
+        else:
+            icon = "✅"
+            summary_text = f"ต่ำกว่าตลิ่งอยู่ *{data['below_bank']:.2f}* ม."
+        
+        # สร้างข้อความเปรียบเทียบและแนวโน้ม
+        comparison_text = ""
+        if "water_level" in last_data:
+            level_diff = data["water_level"] - last_data["water_level"]
+            trend_icon = "📈" if level_diff > 0 else "📉" if level_diff < 0 else "↔️"
+            trend_sign = "+" if level_diff > 0 else ""
+            
+            comparison_text = (
+                f"⬅️ ระดับน้ำเดิม: *{last_data['water_level']:.2f}* ม.รทก.\n\n"
+                f"{trend_icon} แนวโน้ม: *น้ำ{'ขึ้น' if level_diff > 0 else 'ลง' if level_diff < 0 else 'คงที่'}* ({trend_sign}{level_diff:.2f} ม.)"
+            )
+        
+        # สร้างข้อความฉบับสมบูรณ์
+        message = (
+            f"💧 **รายงานระดับน้ำ**\n"
+            f"📍 สถานี: {data['station_name']}\n"
+            f"──────────────────\n"
+            f"🌊 ระดับน้ำปัจจุบัน: *{data['water_level']:.2f}* ม.รทก.\n"
+            f"{comparison_text}\n\n"
+            f"📊 สถานะ: {icon} *{data['status']}*\n"
+            f"       ({summary_text})\n"
+            f"──────────────────\n"
+            f"🗓️ ข้อมูล ณ เวลา: {data['time']}"
+        )
+
+        print(message)
+        send_line_message(message)
+
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    else:
+        print("--> ข้ามการแจ้งเตือน รอบนี้")
+
+    print("--- จบ script ---")
 
 if __name__ == "__main__":
     main()

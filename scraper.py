@@ -12,6 +12,7 @@ LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
 TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 HISTORICAL_LOG_FILE = 'historical_log.csv'
+LAST_DATA_FILE = 'last_data.txt' # เพิ่มตัวแปรสำหรับชื่อไฟล์ last_data.txt
 
 # --- ฟังก์ชันดึงข้อมูล ---
 def get_water_data():
@@ -26,7 +27,10 @@ def get_water_data():
         data = json.loads(match.group(1))
         station_data = data[0].get('itc_water', {}).get('C13', None)
         if station_data:
-            return f"{station_data.get('storage', '-')}/ {station_data.get('qmax', '-')} cms"
+            # ดึงเฉพาะ 'qmax' ซึ่งเป็นค่าปล่อยน้ำ (ถ้ามี)
+            # ถ้าต้องการ 'storage' ด้วย ก็ใช้ f"{station_data.get('storage', '-')}/ {station_data.get('qmax', '-')} cms"
+            # แต่โจทย์ระบุ "การปล่อยน้ำ" จึงเน้นที่ qmax
+            return f"{station_data.get('qmax', '-')} cms" # เปลี่ยนให้ส่งค่า qmax เท่านั้น
         return None
     except Exception as e:
         print(f"Error in get_water_data: {e}")
@@ -92,16 +96,17 @@ def send_line_message(message):
 
 # --- การทำงานหลัก ---
 def main():
-    last_data_file = 'last_data.txt'
+    # อ่านค่า last_data ก่อนดึงข้อมูลปัจจุบัน
     last_data = ''
-    if os.path.exists(last_data_file):
-        with open(last_data_file, 'r', encoding='utf-8') as f:
+    if os.path.exists(LAST_DATA_FILE): # ใช้ LAST_DATA_FILE ที่เพิ่งกำหนด
+        with open(LAST_DATA_FILE, 'r', encoding='utf-8') as f:
             last_data = f.read().strip()
             
     current_data = get_water_data()
     
-    if current_data and current_data != last_data:
-        print("Data has changed! Processing notification...")
+    # ตรวจสอบว่าดึงข้อมูลปัจจุบันมาได้หรือไม่
+    if current_data:
+        print(f"Current data retrieved: {current_data}")
         
         now_thailand = datetime.now(TIMEZONE_THAILAND)
         
@@ -117,32 +122,31 @@ def main():
         
         formatted_datetime = now_thailand.strftime("%d/%m/%Y %H:%M:%S")
         
-        # --- ส่วนที่แก้ไข ---
         sponsor_line = "พื้นที่ผู้สนับสนุน..."
         
-        message = (f"🌊 *แจ้งเตือนระดับน้ำเปลี่ยนแปลง!*\n"
+        # ปรับเปลี่ยนข้อความ LINE ให้ชัดเจนว่าเป็นการแจ้งเตือน "การปล่อยน้ำ"
+        # และรวมค่า last_data เข้าไป
+        message = (f"🌊 *แจ้งเตือนการปล่อยน้ำ เขื่อนเจ้าพระยา, ชัยนาท*\n"
                    f"━━━━━━━━━━\n"
-                   f"*เขื่อนเจ้าพระยา, ชัยนาท*\n\n"
                    f"✅ *ค่าปัจจุบัน*\n`{current_data}`\n\n"
-                   f"⬅️ *ค่าเดิม*\n`{last_data if last_data else 'N/A'}`\n"
+                   f"⬅️ *ค่าเดิม (ก่อนหน้า)*\n`{last_data if last_data else 'ไม่พบข้อมูลเดิม'}`\n" # แสดงค่าเดิม
                    f"━━━━━━━━━━\n"
                    f"🗓️ {formatted_datetime}"
-                   f"{historical_text}\n\n" # เพิ่มบรรทัดว่างเพื่อความสวยงาม
-                   f"{sponsor_line}") # เพิ่มบรรทัดผู้สนับสนุน
-        # --- จบส่วนที่แก้ไข ---
+                   f"{historical_text}\n\n"
+                   f"{sponsor_line}")
 
         send_line_message(message)
         
-        with open(last_data_file, 'w', encoding='utf-8') as f:
+        # บันทึกข้อมูลปัจจุบันลงใน last_data.txt ทุกครั้งที่ส่งแจ้งเตือน
+        with open(LAST_DATA_FILE, 'w', encoding='utf-8') as f:
             f.write(current_data)
         
+        # บันทึกข้อมูลลงใน historical_log.csv ทุกครั้งที่ส่งแจ้งเตือน
         append_to_historical_log(now_thailand, current_data)
-        print("Appended new data to historical log.")
+        print("Appended new data to historical log and updated last_data.txt.")
         
-    elif not current_data:
-        print("Could not retrieve current data.")
     else:
-        print("Data has not changed.")
+        print("Could not retrieve current data. No notification sent.")
 
 if __name__ == "__main__":
     main()

@@ -5,6 +5,7 @@ import os
 from datetime import datetime, timedelta
 import pytz
 import time
+from bs4 import BeautifulSoup
 
 # --- ค่าคงที่และ URL ---
 URL = 'https://tiwrm.hii.or.th/DATA/REPORT/php/chart/chaopraya/small/chaopraya.php'
@@ -14,26 +15,40 @@ TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 HISTORICAL_LOG_FILE = 'historical_log.csv'
 LAST_DATA_FILE = 'last_data.txt'
 
-# --- ฟังก์ชันดึงข้อมูล ---
+# --- ฟังก์ชันดึงข้อมูล (เขียนใหม่ทั้งหมด) ---
 def get_water_data():
-    """ดึงข้อมูลระดับน้ำล่าสุด"""
+    """
+    ดึงข้อมูล "ปริมาณน้ำ" จากตารางบนหน้าเว็บโดยตรง
+    """
     try:
         timestamp = int(time.time())
         url_with_cache_bust = f"{URL}?_={timestamp}"
         response = requests.get(url_with_cache_bust, timeout=15)
         response.raise_for_status()
-        match = re.search(r'var json_data = (\[.*\]);', response.text)
-        if not match: return None
-        data = json.loads(match.group(1))
-        station_data = data[0].get('itc_water', {}).get('C13', None)
-        if station_data:
-            return f"{station_data.get('qmax', '-')} cms"
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # ค้นหา <td> ที่มีข้อความว่า "ปริมาณน้ำ"
+        header_td = soup.find('td', string=lambda text: text and 'ปริมาณน้ำ' in text)
+        
+        if header_td:
+            # ค้นหา <td> ที่อยู่ถัดไป ซึ่งเป็นที่เก็บค่าปริมาณน้ำ
+            value_td = header_td.find_next_sibling('td')
+            if value_td:
+                # ดึงข้อความและตัดส่วนที่ไม่ต้องการ (เช่น " /") ออก
+                raw_text = value_td.get_text(strip=True)
+                water_value = raw_text.split('/')[0].strip()
+                if water_value:
+                    return f"{water_value} cms"
+                    
+        print("Could not find the water data value in the HTML table.")
         return None
+
     except Exception as e:
         print(f"Error in get_water_data: {e}")
         return None
 
-# --- ฟังก์ชันสำหรับข้อมูลย้อนหลัง ---
+# --- ฟังก์ชันสำหรับข้อมูลย้อนหลัง (คงเดิม) ---
 def get_historical_data(target_date):
     """ค้นหาข้อมูลที่ใกล้เคียงกับวันเวลาของปีที่แล้วจากไฟล์ log"""
     if not os.path.exists(HISTORICAL_LOG_FILE):
@@ -67,9 +82,9 @@ def append_to_historical_log(now, data):
     with open(HISTORICAL_LOG_FILE, 'a', encoding='utf-8') as f:
         f.write(f"{now.isoformat()},{data}\n")
 
-# --- ฟังก์ชันส่ง LINE (ฉบับแก้ไขเพื่อดีบัก) ---
+# --- ฟังก์ชันส่ง LINE (คงเดิม) ---
 def send_line_message(message):
-    """ส่งข้อความไปยัง LINE และพิมพ์การตอบกลับเพื่อดีบัก"""
+    """ส่งข้อความไปยัง LINE"""
     if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_TARGET_ID:
         print("Missing LINE credentials.")
         return
@@ -86,21 +101,14 @@ def send_line_message(message):
     
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=10)
-        
-        # --- บรรทัดสำคัญที่เพิ่มเข้ามา ---
-        # พิมพ์ Status Code และข้อความตอบกลับจาก LINE ทั้งหมด
         print(f"LINE API Response Status: {response.status_code}")
         print(f"LINE API Response Body: {response.text}")
-        # ------------------------------------
-        
         response.raise_for_status()
         print("LINE message request sent successfully to LINE API.")
-        
     except Exception as e:
         print(f"An error occurred while sending LINE message: {e}")
 
-
-# --- การทำงานหลัก ---
+# --- การทำงานหลัก (คงเดิม) ---
 def main():
     last_data = ''
     if os.path.exists(LAST_DATA_FILE):

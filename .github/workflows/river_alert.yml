@@ -1,10 +1,8 @@
-name: Inburi River Alert
+name: Inburi River Alert (API Version)
 
-# เปิดสิทธิ์ให้ GITHUB_TOKEN สามารถ push ไฟล์กลับขึ้น repo ได้
 permissions:
   contents: write
 
-# ทริกเกอร์ด้วย manual dispatch และ schedule ทุก 15 นาที
 on:
   workflow_dispatch:
   schedule:
@@ -12,54 +10,32 @@ on:
 
 jobs:
   alert:
-    # ใช้ GitHub-hosted runner (ไม่ต้องติดตั้งเอง)
     runs-on: ubuntu-latest
 
-    # กำหนดตัวแปรแวดล้อมที่ใช้ในสคริปต์
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # เพิ่มตัวแปร CHROME_BIN เพื่อระบุพาธของ Chromium
-      CHROME_BIN: /usr/bin/chromium-browser
-      # เพิ่ม LINE_CHANNEL_ACCESS_TOKEN ตรงนี้เพื่อส่งค่าให้สคริปต์ Python
       LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
 
     steps:
-      # ขั้นตอนที่ 1: เช็คเอาท์โค้ดจาก repo มาไว้บน runner
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      # ขั้นตอนที่ 2: ติดตั้ง Python (ปรับเวอร์ชันตามสคริปต์ได้)
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
-      # ขั้นตอนที่ 3: ติดตั้ง dependencies (apt-get + pip)
       - name: Install dependencies
-        run: |
-          # เพิ่มบรรทัดเหล่านี้เพื่อจัดการกับปัญหา apt lock
-          sudo rm -f /var/lib/dpkg/lock-frontend
-          sudo rm -f /var/lib/dpkg/lock
-          sudo rm -f /var/cache/apt/archives/lock
-          sudo dpkg --configure -a
-          
-          sudo apt-get update
-          sudo apt-get install -y chromium-browser chromium-chromedriver
-          # ไม่ต้องสร้าง symbolic link แล้ว เนื่องจากใน Python script มีการระบุ binary_location โดยตรง
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        run: pip install -r requirements.txt
 
-      # ขั้นตอนที่ 4: รันสคริปต์ตรวจระดับน้ำ
       - name: Run alert script
         run: python inburi_bridge_alert.py
 
-      # ขั้นตอนที่ 5: คอมมิตไฟล์ข้อมูลกลับขึ้น repo หากมีการเปลี่ยนแปลง
       - name: Commit updated data file
         run: |
           git config --local user.name  "GitHub Action"
           git config --local user.email "action@github.com"
           git add inburi_bridge_data.json
-          # ถ้าไฟล์เปลี่ยนจริงๆ ให้ commit+push
           git diff --staged --quiet || (
-            git commit -m "Update river level data"
-            git push
+            git commit -m "Update river level data (API)" && git push
           )

@@ -1,4 +1,4 @@
-# weather_forecaster.py
+# weather_forecaster.py (corrected)
 import requests
 import os
 import time
@@ -30,10 +30,9 @@ def read_state(path):
         with open(path, 'r') as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        # Default: no alerts sent yet
         return {
-            'last_alert_times': {},            # {event_type: last_sent_epoch}
-            'last_alerted_forecasts': {}       # {event_type: {'dt': forecast_epoch, 'value': float}}
+            'last_alert_times': {},
+            'last_alerted_forecasts': {}
         }
 
 
@@ -62,15 +61,9 @@ def send_line(msg):
     if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_TARGET_ID:
         print("Error: LINE_TOKEN or TARGET_ID not set. Skipping LINE notify.")
         return False
-    headers = {
-        'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'
-    }
-    payload = {
-        'to': LINE_TARGET_ID,
-        'messages': [{ 'type': 'text', 'text': msg }]
-    }
+    headers = {'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'}
+    payload = {'to': LINE_TARGET_ID, 'messages': [{'type': 'text', 'text': msg}]}
     try:
-        print("Sending message to LINE...")
         r = requests.post('https://api.line.me/v2/bot/message/push', headers=headers, json=payload, timeout=10)
         r.raise_for_status()
         print("Successfully sent message to LINE.")
@@ -81,41 +74,28 @@ def send_line(msg):
 
 
 def get_current_weather_event():
-    """Check current weather. Return ('RAIN_NOW', data) if raining now."""
     if not OPENWEATHER_API_KEY:
         print("Error: OPENWEATHER_API_KEY not set. Skipping current weather check.")
         return None, None
-    url = (
-        f"https://api.openweathermap.org/data/2.5/weather?"
-        f"lat={LATITUDE}&lon={LONGITUDE}&appid={OPENWEATHER_API_KEY}&units=metric"
-    )
+    url = f"https://api.openweathermap.org/data/2.5/weather?lat={LATITUDE}&lon={LONGITUDE}&appid={OPENWEATHER_API_KEY}&units=metric"
     try:
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()
+        resp = requests.get(url, timeout=10); resp.raise_for_status()
         data = resp.json()
         wid = str(data['weather'][0]['id'])
         if wid.startswith('5'):
-            return 'RAIN_NOW', {
-                'dt': int(time.time()),
-                'value': None
-            }
+            return 'RAIN_NOW', {'dt': int(time.time()), 'value': None}
     except requests.exceptions.RequestException as e:
         print(f"Error fetching current weather: {e}")
     return None, None
 
 
 def get_weather_event():
-    """Check forecast. Return ('FORECAST_RAIN'|'HEAT_WAVE', {{'dt':epoch,'value':float}}) or (None,None)."""
     if not OPENWEATHER_API_KEY:
         print("Error: OPENWEATHER_API_KEY not set. Skipping forecast check.")
         return None, None
-    url = (
-        f"https://api.openweathermap.org/data/2.5/forecast?"
-        f"lat={LATITUDE}&lon={LONGITUDE}&appid={OPENWEATHER_API_KEY}&units=metric"
-    )
+    url = f"https://api.openweathermap.org/data/2.5/forecast?lat={LATITUDE}&lon={LONGITUDE}&appid={OPENWEATHER_API_KEY}&units=metric"
     try:
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()
+        resp = requests.get(url, timeout=10); resp.raise_for_status()
         data = resp.json()
     except requests.exceptions.RequestException as e:
         print(f"Error fetching forecast: {e}")
@@ -123,15 +103,15 @@ def get_weather_event():
 
     now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
     for entry in data.get('list', []):
-        dt_txt = entry.get('dt_txt')
-        forecast_time = datetime.fromisoformat(dt_txt).replace(tzinfo=pytz.UTC)
+        forecast_time = datetime.fromisoformat(entry['dt_txt']).replace(tzinfo=pytz.UTC)
         if forecast_time - now_utc > timedelta(hours=FORECAST_HOURS):
             break
-        pop = entry.get('pop', 0)
+        pop      = entry.get('pop', 0)
         rain_vol = entry.get('rain', {}).get('3h', 0)
         temp_max = entry.get('main', {}).get('temp_max', 0)
         epoch_dt = int(forecast_time.timestamp())
-        if (entry['weather'][0]['id'][:1] in ('5', '2') and pop >= RAIN_CONF_THRESHOLD and rain_vol >= MIN_RAIN_MM):
+        wid_str  = str(entry['weather'][0]['id'])  # Convert int to str to check prefix
+        if wid_str.startswith(('5', '2')) and pop >= RAIN_CONF_THRESHOLD and rain_vol >= MIN_RAIN_MM:
             return 'FORECAST_RAIN', {'dt': epoch_dt, 'value': rain_vol}
         if temp_max >= HEAT_THRESHOLD:
             return 'HEAT_WAVE', {'dt': epoch_dt, 'value': temp_max}
@@ -140,54 +120,42 @@ def get_weather_event():
 
 def main():
     state = read_state(STATE_FILE)
-    last_alert_times = state.get('last_alert_times', {})
-    last_alerted_forecasts = state.get('last_alerted_forecasts', {})
+    last_alert_times        = state.get('last_alert_times', {})
+    last_alerted_forecasts  = state.get('last_alerted_forecasts', {})
 
-    # 1) Current rain check
+    # 1) Check current rain
     event_now, data_now = get_current_weather_event()
     if event_now == 'RAIN_NOW':
-        now = time.time()
-        last_now = last_alert_times.get(event_now, 0)
-        if now - last_now >= COOLDOWN_HOURS * 3600:
-            msg = format_message(event_now, data_now)
-            if send_line(msg):
+        now     = time.time()
+        last_ts = last_alert_times.get(event_now, 0)
+        if now - last_ts >= COOLDOWN_HOURS * 3600:
+            if send_line(format_message(event_now, data_now)):
                 state['last_alert_times'][event_now] = now
                 write_state(STATE_FILE, state)
         return
 
-    # 2) Forecast event check
-    event, forecast = get_weather_event()
-    if event is None:
+    # 2) Check forecast events
+    event_fc, data_fc = get_weather_event()
+    if not event_fc:
+        print("No significant weather events found within the next period.")
         return
-    now = time.time()
-    last_sent = last_alert_times.get(event, 0)
-    forecast_dt = forecast['dt']
-    forecast_val = forecast['value']
-    last_alerted = last_alerted_forecasts.get(event)
+    now        = time.time()
+    last_ts    = last_alert_times.get(event_fc, 0)
+    forecast_dt= data_fc['dt']
+    forecast_val = data_fc['value']
+    prev       = last_alerted_forecasts.get(event_fc, {})
 
-    # Determine if this forecast is new (new dt) or duplicate
-    bypass_cooldown = False
-    if last_alerted:
-        prev_dt = last_alerted.get('dt', 0)
-        prev_val = last_alerted.get('value', 0)
-        if forecast_dt > prev_dt:
-            bypass_cooldown = True
-        elif forecast_dt == prev_dt and abs(prev_val - forecast_val) < 0.1:
-            print("Duplicate forecast. Skipping alert.")
-            return
+    # Bypass cooldown if new forecast time
+    bypass = forecast_dt > prev.get('dt', 0)
+    if not bypass and now - last_ts < COOLDOWN_HOURS*3600:
+        print("Within cooldown. Skipping alert.")
+        return
 
-    if not bypass_cooldown:
-        if now - last_sent < COOLDOWN_HOURS * 3600:
-            print("Within cooldown. Skipping alert.")
-            return
-
-    # Send alert for forecast event
-    msg = format_message(event, {'dt': forecast_dt, 'value': forecast_val})
-    if send_line(msg):
-        state['last_alert_times'][event] = now
-        state['last_alerted_forecasts'][event] = {'dt': forecast_dt, 'value': forecast_val}
+    # Send forecast alert
+    if send_line(format_message(event_fc, data_fc)):
+        state['last_alert_times'][event_fc]       = now
+        state['last_alerted_forecasts'][event_fc] = {'dt': forecast_dt, 'value': forecast_val}
         write_state(STATE_FILE, state)
-
 
 if __name__ == '__main__':
     main()

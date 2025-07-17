@@ -1,54 +1,46 @@
-name: Inburi River Alert
+name: River Alert
 
-# เปิดสิทธิ์ให้ GITHUB_TOKEN สามารถ push ไฟล์กลับขึ้น repo ได้
-permissions:
-  contents: write
-
-# ทริกเกอร์ด้วย manual dispatch และ schedule ทุก 15 นาที
 on:
-  workflow_dispatch:
   schedule:
+    # รันทุก 15 นาที ปรับตามต้องการ
     - cron: '*/15 * * * *'
+  workflow_dispatch:
 
 jobs:
   alert:
-    # ใช้ GitHub-hosted runner (ไม่ต้องติดตั้งเอง)
     runs-on: ubuntu-latest
-
-    # กำหนดตัวแปรแวดล้อมที่ใช้ในสคริปต์
     env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+      # ชี้ไปยังไบนารี Chrome และ Chromedriver
+      CHROME_BIN: /usr/bin/google-chrome-stable
+      CHROMEDRIVER_PATH: /usr/bin/chromedriver
+      # นำค่า Token และ Threshold มาจาก GitHub secrets
+      LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+      NOTIFICATION_THRESHOLD_M: ${{ secrets.NOTIFICATION_THRESHOLD_M }}
     steps:
-      # ขั้นตอนที่ 1: เช็คเอาท์โค้ดจาก repo มาไว้บน runner
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # ขั้นตอนที่ 2: ติดตั้ง Python (ปรับเวอร์ชันตามสคริปต์ได้)
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
 
-      # ขั้นตอนที่ 3: ติดตั้ง dependencies (apt-get + pip)
-      - name: Install dependencies
+      - name: Install dependencies (Chrome + Chromedriver)
         run: |
           sudo apt-get update
-          sudo apt-get install -y chromium-browser chromium-chromedriver
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # ขั้นตอนที่ 4: รันสคริปต์ตรวจระดับน้ำ
+          # ติดตั้งเฉพาะ Chromedriver จาก APT ปกติ (ข้าม snap)
+          sudo apt-get install -y chromium-chromedriver wget
+
+          # ติดตั้ง Google Chrome Stable จาก .deb (ไม่ใช้ snap)
+          wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
+
+          # ติดตั้ง Python requirements
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+
       - name: Run alert script
         run: python inburi_bridge_alert.py
-
-      # ขั้นตอนที่ 5: คอมมิตไฟล์ข้อมูลกลับขึ้น repo หากมีการเปลี่ยนแปลง
-      - name: Commit updated data file
-        run: |
-          git config --local user.name  "GitHub Action"
-          git config --local user.email "action@github.com"
-          git add inburi_bridge_data.json
-          # ถ้าไฟล์เปลี่ยนจริงๆ ให้ commit+push
-          git diff --staged --quiet || (
-            git commit -m "Update river level data"
-            git push
-          )

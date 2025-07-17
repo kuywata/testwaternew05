@@ -15,31 +15,35 @@ TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 HISTORICAL_LOG_FILE = 'historical_log.csv'
 LAST_DATA_FILE = 'last_data.txt'
 
-# --- ฟังก์ชันดึงข้อมูล (เวอร์ชันแก้ไขสมบูรณ์) ---
+# --- ฟังก์ชันดึงข้อมูล (เขียนใหม่ทั้งหมดเพื่อความเสถียรสูงสุด) ---
 def get_water_data():
     """
-    ดึงข้อมูล "ปริมาณน้ำ" โดยใช้วิธีค้นหา tag ที่มีความสัมพันธ์กันซึ่งมีความเสถียรสูงสุด
+    ดึงข้อมูล "ปริมาณน้ำ" โดยใช้วิธีค้นหาจาก pattern ที่แน่นอนที่สุดใน HTML
     """
     try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
         timestamp = int(time.time())
         url_with_cache_bust = f"{URL}?_={timestamp}"
-        response = requests.get(url_with_cache_bust, timeout=15)
+        response = requests.get(url_with_cache_bust, headers=headers, timeout=15)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
+
+        # ค้นหาทุก <td> ที่มี class 'text_bold' และ attribute 'colspan' เป็น '2'
+        # ซึ่งเป็นลักษณะเฉพาะของช่องข้อมูลที่เราต้องการ
+        value_tags = soup.find_all('td', class_='text_bold', colspan='2')
         
-        # ใช้วิธีค้นหา tag ที่มีคำว่า 'ปริมาณน้ำ' แล้วหา tag td ถัดไป
-        header_tag = soup.find(lambda tag: tag.name == 'td' and 'ปริมาณน้ำ' in tag.get_text())
-        
-        if header_tag:
-            value_tag = header_tag.find_next_sibling('td')
-            if value_tag:
-                raw_text = value_tag.get_text(strip=True)
+        for tag in value_tags:
+            # ตรวจสอบว่าใน tag นั้นมีเครื่องหมาย '/' หรือไม่ เพื่อให้แน่ใจว่าเป็นข้อมูลปริมาณน้ำ
+            if '/' in tag.get_text():
+                raw_text = tag.get_text(strip=True)
                 water_value = raw_text.split('/')[0].strip()
                 if water_value:
                     return f"{water_value} cms"
-                    
-        print("Could not find the water data value using the final robust method.")
+
+        print("Could not find the specific water data tag.")
         return None
 
     except Exception as e:

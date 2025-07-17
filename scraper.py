@@ -16,32 +16,35 @@ LAST_DATA_FILE = 'last_data.txt'
 
 def get_water_data(timeout=30):
     """
-    ดึงข้อมูลปริมาณน้ำโดยการค้นหาจากข้อความอ้างอิงที่ตายตัว ("ที่ท้ายเขื่อนเจ้าพระยา")
-    แล้วจึงค้นหาข้อมูลจากโครงสร้าง HTML ที่อยู่ถัดไป ทำให้มีความแม่นยำและเสถียรสูง
+    ดึงข้อมูลปริมาณน้ำโดยใช้ 'ปริมาณน้ำ' เป็นจุดอ้างอิง แล้วหาข้อมูลจาก element ที่อยู่ถัดไป
+    ซึ่งเป็นวิธีที่เจาะจงและเสถียรมาก
     """
     try:
         response = requests.get(URL, timeout=timeout)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
 
-        anchor_tag = soup.find('strong', string='ที่ท้ายเขื่อนเจ้าพระยา')
-        if not anchor_tag:
-            print("Error: ไม่พบจุดอ้างอิง 'ที่ท้ายเขื่อนเจ้าพระยา' ในหน้าเว็บ")
+        # 1. ค้นหา <td> ที่มีข้อความว่า "ปริมาณน้ำ"
+        label_cell = soup.find('td', string='ปริมาณน้ำ')
+
+        if not label_cell:
+            print("Error: ไม่พบป้ายกำกับ 'ปริมาณน้ำ' ในหน้าเว็บ")
             return None
 
-        data_row = anchor_tag.find_parent('tr').find_next_sibling('tr')
-        if not data_row:
-            print("Error: ไม่พบแถวของข้อมูลที่อยู่ถัดจากจุดอ้างอิง")
-            return None
+        # 2. ข้อมูลตัวเลขจะอยู่ใน <td> ถัดไป (next sibling)
+        data_cell = label_cell.find_next_sibling('td')
 
-        data_cell = data_row.find('td', class_='text_bold')
         if not data_cell:
-            print("Error: ไม่พบช่องของข้อมูล (td.text_bold)")
+            print("Error: ไม่พบช่องข้อมูลที่อยู่ถัดจากป้ายกำกับ")
             return None
 
+        # 3. ดึงข้อความออกมา ซึ่งจะมีรูปแบบ "439.00/ 2840 cms"
         raw_text = data_cell.get_text(strip=True)
+        
+        # 4. แยกข้อมูลส่วนหน้าเครื่องหมาย / ออกมา
         if "/" in raw_text:
             main_value = raw_text.split('/')[0].strip()
+            # คัดกรองให้เหลือแต่ตัวเลขและจุดทศนิยม
             num = re.sub(r"[^\d.]", "", main_value)
             if num:
                 return f"{num} cms"

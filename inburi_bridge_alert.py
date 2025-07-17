@@ -5,8 +5,9 @@ import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 
-# --- ส่วนนี้เหมือนเดิม ---
+# --- Configurations ---
 DATA_FILE = "inburi_bridge_data.json"
 NOTIFICATION_THRESHOLD = float(os.getenv("NOTIFICATION_THRESHOLD_M", "0.10"))
 LINE_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
@@ -15,24 +16,31 @@ def send_line_message(message: str):
     if not LINE_ACCESS_TOKEN:
         print("--> ❌ LINE_CHANNEL_ACCESS_TOKEN ไม่ถูกตั้งค่า!")
         return
-    # ... (โค้ดส่งข้อความผ่าน LINE API)
-
+    url = "https://api.line.me/v2/bot/message/push"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {LINE_ACCESS_TOKEN}"
+    }
+    payload = {
+        "to": os.getenv("LINE_TARGET_ID"),
+        "messages": [{"type": "text", "text": message}]
+    }
+    resp = requests.post(url, headers=headers, json=payload)
+    if resp.status_code != 200:
+        print(f"--> ❌ ส่ง LINE ไม่สำเร็จ: {resp.status_code} {resp.text}")
 
 def setup_driver():
-    from selenium.webdriver.chrome.service import Service
     chrome_options = Options()
-    # ชี้ไปที่ไบนารีของ Chromium ที่ติดตั้งด้วย apt
-    chrome_bin = os.getenv("CHROME_BIN", "/usr/bin/chromium-browser")
-    chrome_options.binary_location = chrome_bin
+    # ใช้ไบนารีของ Google Chrome ที่ติดตั้งจาก .deb
+    chrome_options.binary_location = os.getenv("CHROME_BIN", "/usr/bin/google-chrome-stable")
     chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    # ระบุ path ของ chromedriver ที่ติดตั้งด้วย apt
-    chromedriver_path = os.getenv("CHROMEDRIVER_PATH", "/usr/bin/chromedriver")
-    service = Service(executable_path=chromedriver_path)
+
+    # ชี้ไปยัง Chromedriver ที่ติดตั้งด้วย APT
+    service = Service(executable_path=os.getenv("CHROMEDRIVER_PATH", "/usr/bin/chromedriver"))
     driver = webdriver.Chrome(service=service, options=chrome_options)
     return driver
-
 
 def get_water_data():
     driver = setup_driver()
@@ -40,25 +48,22 @@ def get_water_data():
         driver.get("https://singburi.thaiwater.net/wl")
         print("--> รอโหลดหน้าเว็บ 7 วินาที...")
         time.sleep(7)
+
         soup = BeautifulSoup(driver.page_source, "html.parser")
-        # ... (โค้ดดึงข้อมูลน้ำจากตาราง)
-        # ตัวอย่าง:
         table = soup.find("table", {"class": "table table-striped"})
-        rows = table.find_all("tr")
-        for row in rows:
+        if not table:
+            return None
+
+        for row in table.find_all("tr"):
             cols = row.find_all("td")
-            if not cols:
-                continue
             th = row.find("th")
-            if th and "อินทร์บุรี" in th.text:
-                # แปลงข้อมูลแต่ละคอลัมน์เป็นตัวเลข
+            if th and "อินทร์บุรี" in th.text and len(cols) >= 3:
                 water_level = float(cols[1].text.strip())
                 bank_level = float(cols[2].text.strip())
-                status = cols[3].text.strip()
-                # ... (โค้ดคำนวณ below_bank, time)
-                below_bank = bank_level - water_level
+                status = cols[3].text.strip() if len(cols) > 3 else "-"
+                below_bank = round(bank_level - water_level, 2)
                 current_time = time.strftime("%H:%M น.", time.localtime())
-                data = {
+                return {
                     "station_name": "อินทร์บุรี",
                     "water_level": water_level,
                     "bank_level": bank_level,
@@ -66,36 +71,34 @@ def get_water_data():
                     "below_bank": below_bank,
                     "time": current_time,
                 }
-                return data
         return None
     finally:
         driver.quit()
 
-
 def main():
     print("--- เริ่มทำงาน inburi_bridge_alert.py ---")
+
     last_data = {}
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             last_data = json.load(f)
-            print(f"โหลดข้อมูลเก่า: {last_data}")
+        print(f"โหลดข้อมูลเก่า: {last_data}")
 
     data = get_water_data()
     if not data:
         print("--> ไม่มีข้อมูลใหม่, จบการทำงาน")
         return
 
-    # ตรวจสอบเงื่อนไขการแจ้งเตือน
+    # ถ้าค่าระดับน้ำเปลี่ยน แสดงว่าส่งแจ้งเตือนใหม่
     if last_data.get("water_level") != data["water_level"]:
-        # สร้างข้อความแจ้งเตือน
         message = (
-            f"🌊 สถานี {data['station_name']}: ระดับน้ำ {data['water_level']} ม.เหนือระดับน้ำท่วม\n"
-            f"🛤️ ระดับตลิ่ง {data['bank_level']} ม.เหนือระดับน้ำท่วม\n"
-            f"⚠️ สถานะ: {data['status']}\n"
-            f"📉 ห่างจากตลิ่ง {data['below_bank']} ม.\n"
-            f"🗓️ ข้อมูล ณ เวลา: {data['time']}"
+            f"🌊 สถานี {data['station_name']}:\n"
+            f"• ระดับน้ำ: {data['water_level']} ม.เหนือระดับน้ำท่วม\n"
+            f"• ระดับตลิ่ง: {data['bank_level']} ม.\n"
+            f"• สถานะ: {data['status']}\n"
+            f"• ห่างจากตลิ่ง: {data['below_bank']} ม.\n"
+            f"🕒 เวลา: {data['time']}"
         )
-
         print(message)
         send_line_message(message)
 
@@ -105,7 +108,6 @@ def main():
         print("--> ข้ามการแจ้งเตือน รอบนี้")
 
     print("--- จบ script ---")
-
 
 if __name__ == "__main__":
     main()

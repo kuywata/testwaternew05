@@ -1,30 +1,29 @@
 import os
-import time
 import re
 import requests
 from datetime import datetime, timedelta
 import pytz
-from bs4 import BeautifulSoup
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
-# ‑‑‑ ค่าคงที่และ URL ‑‑‑
+# ─── ค่าคงที่ ──────────────────────────────────────────────────────
 URL = 'https://tiwrm.hii.or.th/DATA/REPORT/php/chart/chaopraya/small/chaopraya.php'
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
-LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
-TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
-HISTORICAL_LOG_FILE = 'historical_log.csv'
-LAST_DATA_FILE = 'last_data.txt'
+LINE_TARGET_ID             = os.environ.get('LINE_TARGET_ID')
+TIMEZONE_THAILAND          = pytz.timezone('Asia/Bangkok')
+HISTORICAL_LOG_FILE        = 'historical_log.csv'
+LAST_DATA_FILE             = 'last_data.txt'
 
 
-def get_water_data():
+def get_water_data(timeout=15):
+    """  
+    เปิดหน้าเว็บแบบ headless, รอให้ td.text_bold[colspan="2"] ปรากฏ,
+    ดึงข้อความ เช่น "439.00/ 2840 cms" แล้ว return "439.00 cms"
     """
-    เปิดหน้าเว็บด้วย Selenium แบบ headless ให้ JS ทำงานก่อน
-    แล้ว parse เอา <td class="text_bold" colspan="2"> ที่มีค่า “439.00/… cms”
-    คืนค่า "439.00 cms" หรือตัวเลข+หน่วย หากเจอ
-    """
-    # เซ็ต Chrome headless
     opts = Options()
     opts.add_argument("--headless")
     opts.add_argument("--no-sandbox")
@@ -32,23 +31,27 @@ def get_water_data():
 
     driver = webdriver.Chrome(options=opts)
     driver.get(URL)
-    time.sleep(5)  # รอให้ JS โหลดข้อมูลเสร็จ
-    html = driver.page_source
-    driver.quit()
 
-    soup = BeautifulSoup(html, 'html.parser')
-    # เลือก td ที่คุณระบุ (within <tr valign="buttom"> แต่ selector นี้ก็เพียงพอ)
-    cell = soup.select_one('td.text_bold[colspan="2"]')
-    if cell:
-        txt = cell.get_text(strip=True)  # e.g. "439.00/2840cms"
-        # ตัดเอาส่วนก่อน "/" แล้วลบตัวอักษรที่ไม่ใช่ตัวเลขหรือจุดออก
-        main = txt.split('/', 1)[0]
-        clean = re.sub(r'[^\d.]', '', main)
-        if clean:
-            return f"{clean} cms"
+    try:
+        wait = WebDriverWait(driver, timeout)
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'td.text_bold[colspan="2"]')))
+        elem = driver.find_element(By.CSS_SELECTOR, 'td.text_bold[colspan="2"]')
+        raw = elem.text          # ex: "439.00/ 2840 cms"
+    except Exception as e:
+        print("Selenium error or timeout:", e)
+        raw = driver.page_source  # fallback ไป regex
+    finally:
+        driver.quit()
 
-    # ถ้าไม่เจอ fallback ด้วย regex หาเลข+cms ใดๆ ใน html
-    m = re.search(r'([\d\.]+)\s*cms', html)
+    # ถ้า raw เป็นข้อความ `<td>` ให้แยกก่อน slash
+    if "/" in raw:
+        main = raw.split("/", 1)[0]
+        num  = re.sub(r"[^\d.]", "", main)
+        if num:
+            return f"{num} cms"
+
+    # fallback: หาเลข+cms ใน raw ทั้งหน้า
+    m = re.search(r"([\d\.]+)\s*cms", raw)
     if m:
         return f"{m.group(1)} cms"
 
@@ -60,19 +63,18 @@ def get_historical_data(target_date):
     if not os.path.exists(HISTORICAL_LOG_FILE):
         return None
     start = target_date - timedelta(hours=12)
-    end = target_date + timedelta(hours=12)
+    end   = target_date + timedelta(hours=12)
     best, best_diff = None, timedelta.max
     with open(HISTORICAL_LOG_FILE, 'r', encoding='utf-8') as f:
         for line in f:
             try:
-                ts, val = line.strip().split(',', 1)
+                ts, val = line.strip().split(",", 1)
                 dt = datetime.fromisoformat(ts)
                 if dt.tzinfo is None:
                     dt = TIMEZONE_THAILAND.localize(dt)
-                if start <= dt <= end:
-                    diff = abs(target_date - dt)
-                    if diff < best_diff:
-                        best_diff, best = diff, val
+                diff = abs(target_date - dt)
+                if start <= dt <= end and diff < best_diff:
+                    best_diff, best = diff, val
             except ValueError:
                 continue
     return best
@@ -105,7 +107,7 @@ def send_line_message(message):
 
 
 def main():
-    # อ่านค่าก่อนหน้า
+    # อ่านค่าปัจจุบันและค่าเก่า
     last = ''
     if os.path.exists(LAST_DATA_FILE):
         last = open(LAST_DATA_FILE, 'r', encoding='utf-8').read().strip()
@@ -119,21 +121,20 @@ def main():
     now_th = datetime.now(TIMEZONE_THAILAND)
 
     # หาเทียบกับปีที่แล้ว
-    last_year = now_th - timedelta(days=365)
-    hist = get_historical_data(last_year)
-    hist_str = f"\n\nเทียบกับปีที่แล้ว ({last_year.strftime('%d/%m/%Y')}): {hist}" if hist else ''
+    hist = get_historical_data(now_th - timedelta(days=365))
+    hist_str = f"\n\nเทียบปีที่แล้ว ({(now_th - timedelta(days=365)).strftime('%d/%m/%Y')}): {hist}" if hist else ''
 
-    message = (
-        f"🌊 แจ้งเตือนปล่อยน้ำ เขื่อนเจ้าพระยา\n"
+    msg = (
+        f"🌊 แจ้งเตือนปริมาณน้ำ เขื่อนเจ้าพระยา\n"
         f"━━━━━━━━━━\n"
-        f"✅ ค่าปัจจุบัน: {current}\n"
-        f"⬅️ ค่าเดิม: {last or 'ไม่พบ'}\n"
+        f"✅ ปัจจุบัน: {current}\n"
+        f"⬅️ เดิม: {last or 'ไม่พบ'}\n"
         f"🗓️ {now_th.strftime('%d/%m/%Y %H:%M:%S')}"
         f"{hist_str}"
     )
-    send_line_message(message)
+    send_line_message(msg)
 
-    # บันทึกข้อมูล
+    # อัปเดตไฟล์เก็บข้อมูล
     with open(LAST_DATA_FILE, 'w', encoding='utf-8') as f:
         f.write(current)
     append_to_historical_log(now_th, current)

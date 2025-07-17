@@ -2,7 +2,7 @@ name: Inburi Bridge Alert
 
 on:
   schedule:
-    - cron: "0 * * * *"  # รันทุกต้นชั่วโมง
+    - cron: "0 * * * *"  # รันทุกชั่วโมง
   workflow_dispatch:
 
 jobs:
@@ -23,15 +23,15 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.10
+          python-version: '3.10'
 
       - name: Install dependencies (Chrome + Chromedriver)
         run: |
           sudo apt-get update
 
-          # ติดตั้ง lib ที่จำเป็นสำหรับ Chrome
+          # ติดตั้งไลบรารีที่ Chrome ต้องการ
           sudo apt-get install -y --no-install-recommends wget fonts-liberation libasound2 libatk-bridge2.0-0 libatk1.0-0 \
-              libcups2 libdbus-1-3 libgdk-pixbuf2.0-0 libnspr4 libnss3 libx11-xcb1 libxcomposite1 libxdamage1 libxrandr2 xdg-utils
+            libcups2 libdbus-1-3 libgdk-pixbuf2.0-0 libnspr4 libnss3 libx11-xcb1 libxcomposite1 libxdamage1 libxrandr2 xdg-utils
 
           # ดาวน์โหลดและติดตั้ง Google Chrome
           wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
@@ -40,8 +40,8 @@ jobs:
           # ติดตั้ง Chromedriver
           sudo apt-get install -y chromium-chromedriver
 
-          # ติดตั้ง Python packages
+          # ติดตั้ง Python dependencies
           pip install -r requirements.txt
 
-      - name: Run alert script
+      - name: Run water alert script
         run: python inburi_bridge_alert.py

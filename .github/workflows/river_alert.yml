@@ -1,41 +1,105 @@
-name: Inburi River Alert (API FINAL)
+import os
+import json
+import requests
+from datetime import datetime, timedelta
 
-permissions:
-  contents: write
+# --- Constants ---
+DATA_FILE = "inburi_bridge_data.json"
+LINE_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+LINE_API_URL = "https://api.line.me/v2/bot/message/broadcast"
+NOTIFICATION_THRESHOLD = 0.01  # แจ้งเตือนเมื่อระดับน้ำเปลี่ยนเกิน 1 ซม.
+API_URL = "https://api-v3.thaiwater.net/api/v1/tele/station/C.2"
 
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: '*/15 * * * *'
 
-jobs:
-  alert:
-    runs-on: ubuntu-latest
+def load_last_data():
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
 
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+def fetch_data():
+    try:
+        resp = requests.get(API_URL, timeout=20)
+        resp.raise_for_status()
+        data = resp.json().get("data", [])
+        if not data:
+            print("--> ERROR: API returned no data")
+            return None
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
+        station = data[0].get("tele_station_waterlevel", {})
+        water_level = float(station.get("storage_waterlevel", 0.0))
+        bank_level = float(station.get("ground_waterlevel", 0.0))
+        ts = station.get("storage_datetime")
 
-      - name: Install dependencies
-        run: pip install requests
+        # Convert UTC to Bangkok time
+        dt = datetime.fromisoformat(ts.replace('Z', '+00:00')) + timedelta(hours=7)
 
-      - name: Run alert script
-        run: python inburi_bridge_alert.py
+        return {
+            "station_name": "สถานีอินทร์บุรี (C.2)",
+            "water_level": water_level,
+            "bank_level": bank_level,
+            "below_bank": bank_level - water_level,
+            "status": station.get("waterlevel_status", {}).get("waterlevel_status_name", "N/A"),
+            "time": dt.strftime('%Y-%m-%d %H:%M:%S')
+        }
+    except Exception as e:
+        print(f"--> ERROR fetching data: {e}")
+        return None
 
-      - name: Commit updated data file
-        run: |
-          git config --local user.name "GitHub Action"
-          git config --local user.email "action@github.com"
-          git add inburi_bridge_data.json
-          git diff --staged --quiet || (
-            git commit -m "Update river level data" && git push
-          )
+
+def send_line_message(text):
+    if not LINE_ACCESS_TOKEN:
+        print("--> SKIPPING LINE: No Access Token.")
+        return
+    headers = {"Authorization": f"Bearer {LINE_ACCESS_TOKEN}", "Content-Type": "application/json"}
+    payload = {"messages": [{"type": "text", "text": text}]}
+    try:
+        requests.post(LINE_API_URL, headers=headers, json=payload, timeout=10)
+        print("--> LINE message sent successfully.")
+    except Exception as e:
+        print(f"--> ERROR sending LINE message: {e}")
+
+
+def main():
+    print("--- Running Water Level Checker (API Version) ---")
+    last = load_last_data()
+    print(f"Old Level: {last.get('water_level', 'None')}")
+
+    current = fetch_data()
+    if not current:
+        print("--- EXIT: Failed to fetch new data. ---")
+        return
+    print(f"New Level: {current['water_level']}")
+
+    # Save for next run
+    with open(DATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(current, f, ensure_ascii=False, indent=2)
+
+    if not last:
+        print("--> First run, data saved. No notification.")
+        return
+
+    diff = current['water_level'] - last.get('water_level', 0.0)
+    if abs(diff) < NOTIFICATION_THRESHOLD:
+        print(f"--> Change ({diff:+.3f} m) below threshold. No notification.")
+        return
+
+    trend = "น้ำขึ้น" if diff > 0 else "น้ำลง"
+    emoji = '🔴' if 'ล้นตลิ่ง' in current['status'] else '⚠️' if 'เฝ้าระวัง' in current['status'] else '✅'
+
+    msg = (
+        f"💧 แจ้งเตือนระดับน้ำ {current['station_name']}\n\n"
+        f"🌊 ระดับปัจจุบัน: {current['water_level']:.2f} ม.รทก."
+        f"   (เปลี่ยนแปลง {diff:+.2f} ม. - {trend})\n\n"
+        f"📊 สถานะ: {emoji} {current['status']}\n\n"
+        f"⏰ เวลา: {current['time']}"
+    )
+
+    print("--- Significant change detected! Sending LINE message. ---")
+    send_line_message(msg)
+    print("--- Script finished successfully. ---")
+
+
+if __name__ == "__main__":
+    main()

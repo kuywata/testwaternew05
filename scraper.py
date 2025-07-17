@@ -67,21 +67,38 @@ def append_to_historical_log(now, data):
     with open(HISTORICAL_LOG_FILE, 'a', encoding='utf-8') as f:
         f.write(f"{now.isoformat()},{data}\n")
 
-# --- ฟังก์ชันส่ง LINE ---
+# --- ฟังก์ชันส่ง LINE (ฉบับแก้ไขเพื่อดีบัก) ---
 def send_line_message(message):
-    """ส่งข้อความไปยัง LINE"""
+    """ส่งข้อความไปยัง LINE และพิมพ์การตอบกลับเพื่อดีบัก"""
     if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_TARGET_ID:
-        print("LINE credentials not set.")
+        print("Missing LINE credentials.")
         return
+        
     url = 'https://api.line.me/v2/bot/message/push'
-    headers = { 'Content-Type': 'application/json', 'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}' }
-    payload = { 'to': LINE_TARGET_ID, 'messages': [{'type': 'text', 'text': message}] }
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'
+    }
+    payload = {
+        'to': LINE_TARGET_ID,
+        'messages': [{'type':'text','text':message}]
+    }
+    
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=10)
+        
+        # --- บรรทัดสำคัญที่เพิ่มเข้ามา ---
+        # พิมพ์ Status Code และข้อความตอบกลับจาก LINE ทั้งหมด
+        print(f"LINE API Response Status: {response.status_code}")
+        print(f"LINE API Response Body: {response.text}")
+        # ------------------------------------
+        
         response.raise_for_status()
-        print("LINE message sent successfully!")
+        print("LINE message request sent successfully to LINE API.")
+        
     except Exception as e:
-        print(f"Error sending LINE message: {e}")
+        print(f"An error occurred while sending LINE message: {e}")
+
 
 # --- การทำงานหลัก ---
 def main():
@@ -110,7 +127,6 @@ def main():
         formatted_datetime = now_thailand.strftime("%d/%m/%Y %H:%M:%S")
         sponsor_line = "พื้นที่ผู้สนับสนุน..."
         
-        # --- นี่คือโค้ดส่วนที่แก้ไขสมบูรณ์และเสถียร ---
         message = (
             f"🌊 *แจ้งเตือนการปล่อยน้ำ เขื่อนเจ้าพระยา, ชัยนาท*\n"
             f"━━━━━━━━━━\n"

@@ -1,6 +1,6 @@
 import os
 import time
-import json
+import re
 import requests
 from datetime import datetime, timedelta
 import pytz
@@ -8,9 +8,8 @@ from bs4 import BeautifulSoup
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 
-# --- ค่าคงที่และ URL ---
+# ‑‑‑ ค่าคงที่และ URL ‑‑‑
 URL = 'https://tiwrm.hii.or.th/DATA/REPORT/php/chart/chaopraya/small/chaopraya.php'
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
@@ -21,44 +20,39 @@ LAST_DATA_FILE = 'last_data.txt'
 
 def get_water_data():
     """
-    ใช้ Selenium เปิดหน้าเว็บแบบ headless ให้ JS ทำงานก่อน แล้ว parse ผลลัพธ์
-    คืนค่า "<number> cms" หรือ None ถ้ายังหาไม่เจอ
+    เปิดหน้าเว็บด้วย Selenium แบบ headless ให้ JS ทำงานก่อน
+    แล้ว parse เอา <td class="text_bold" colspan="2"> ที่มีค่า “439.00/… cms”
+    คืนค่า "439.00 cms" หรือตัวเลข+หน่วย หากเจอ
     """
-    # ตั้งค่า Chrome options
-    options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
+    # เซ็ต Chrome headless
+    opts = Options()
+    opts.add_argument("--headless")
+    opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-dev-shm-usage")
 
-    # เรียก Chrome ผ่าน Selenium
-    driver = webdriver.Chrome(options=options)
+    driver = webdriver.Chrome(options=opts)
     driver.get(URL)
-    # รอให้ JS โหลดข้อมูลลง DOM
-    time.sleep(5)
-
+    time.sleep(5)  # รอให้ JS โหลดข้อมูลเสร็จ
     html = driver.page_source
     driver.quit()
 
     soup = BeautifulSoup(html, 'html.parser')
+    # เลือก td ที่คุณระบุ (within <tr valign="buttom"> แต่ selector นี้ก็เพียงพอ)
+    cell = soup.select_one('td.text_bold[colspan="2"]')
+    if cell:
+        txt = cell.get_text(strip=True)  # e.g. "439.00/2840cms"
+        # ตัดเอาส่วนก่อน "/" แล้วลบตัวอักษรที่ไม่ใช่ตัวเลขหรือจุดออก
+        main = txt.split('/', 1)[0]
+        clean = re.sub(r'[^\d.]', '', main)
+        if clean:
+            return f"{clean} cms"
 
-    # หา <td class="text_bold" colspan="2"> ที่น่าจะเป็นช่องปริมาณน้ำ
-    tags = soup.find_all('td', class_='text_bold', colspan='2')
-    for tag in tags:
-        text = tag.get_text(strip=True)
-        # คาดว่าข้อความเช่น "5.47 / 1,200.00 cms" 
-        if '/' in text and 'cms' in text:
-            # ตัดเอาส่วนก่อน "/" แล้ว strip
-            value = text.split('/')[0].strip()
-            # เติมหน่วย
-            return f"{value} cms"
-
-    # ถ้ายังไม่เจอ ลอง fallback ด้วย regex หาเลข + "cms" ใน source
-    import re
+    # ถ้าไม่เจอ fallback ด้วย regex หาเลข+cms ใดๆ ใน html
     m = re.search(r'([\d\.]+)\s*cms', html)
     if m:
         return f"{m.group(1)} cms"
 
-    print("Error: ไม่พบข้อมูลปริมาณน้ำหลังรัน JS แล้ว")
+    print("Error: ไม่พบข้อมูลปริมาณน้ำ")
     return None
 
 
@@ -67,8 +61,7 @@ def get_historical_data(target_date):
         return None
     start = target_date - timedelta(hours=12)
     end = target_date + timedelta(hours=12)
-    best = None
-    best_diff = timedelta.max
+    best, best_diff = None, timedelta.max
     with open(HISTORICAL_LOG_FILE, 'r', encoding='utf-8') as f:
         for line in f:
             try:
@@ -112,47 +105,38 @@ def send_line_message(message):
 
 
 def main():
-    last_data = ''
+    # อ่านค่าก่อนหน้า
+    last = ''
     if os.path.exists(LAST_DATA_FILE):
-        with open(LAST_DATA_FILE, 'r', encoding='utf-8') as f:
-            last_data = f.read().strip()
+        last = open(LAST_DATA_FILE, 'r', encoding='utf-8').read().strip()
 
-    current_data = get_water_data()
-    if not current_data:
+    current = get_water_data()
+    if not current:
         print("ไม่สามารถดึงค่าปัจจุบันได้ จึงไม่มีการแจ้งเตือน")
         return
 
-    print("ค่าปัจจุบัน:", current_data)
+    print("ค่าปัจจุบัน:", current)
     now_th = datetime.now(TIMEZONE_THAILAND)
 
-    # หาค่าเปรียบเทียบจากปีที่แล้ว
+    # หาเทียบกับปีที่แล้ว
     last_year = now_th - timedelta(days=365)
     hist = get_historical_data(last_year)
-    hist_text = ''
-    if hist:
-        hist_date_str = last_year.strftime("%d/%m/%Y")
-        hist_text = f"\n\nเทียบกับปีที่แล้ว ({hist_date_str}): {hist}"
-
-    dt_str = now_th.strftime("%d/%m/%Y %H:%M:%S")
-    sponsor = "พื้นที่ผู้สนับสนุน..."
+    hist_str = f"\n\nเทียบกับปีที่แล้ว ({last_year.strftime('%d/%m/%Y')}): {hist}" if hist else ''
 
     message = (
-        f"🌊 *แจ้งเตือนการปล่อยน้ำ เขื่อนเจ้าพระยา, ชัยนาท*\n"
+        f"🌊 แจ้งเตือนปล่อยน้ำ เขื่อนเจ้าพระยา\n"
         f"━━━━━━━━━━\n"
-        f"✅ *ค่าปัจจุบัน:*\n{current_data}\n\n"
-        f"⬅️ *ค่าเดิม (ก่อนหน้า):* {last_data if last_data else 'ไม่พบข้อมูลเดิม'}\n"
-        f"━━━━━━━━━━\n"
-        f"🗓️ {dt_str}"
-        f"{hist_text}\n\n"
-        f"{sponsor}"
+        f"✅ ค่าปัจจุบัน: {current}\n"
+        f"⬅️ ค่าเดิม: {last or 'ไม่พบ'}\n"
+        f"🗓️ {now_th.strftime('%d/%m/%Y %H:%M:%S')}"
+        f"{hist_str}"
     )
-
     send_line_message(message)
 
-    # บันทึกข้อมูลปัจจุบัน
+    # บันทึกข้อมูล
     with open(LAST_DATA_FILE, 'w', encoding='utf-8') as f:
-        f.write(current_data)
-    append_to_historical_log(now_th, current_data)
+        f.write(current)
+    append_to_historical_log(now_th, current)
     print("อัปเดต historical log เรียบร้อย")
 
 

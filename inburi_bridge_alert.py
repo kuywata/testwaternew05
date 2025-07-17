@@ -7,9 +7,19 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 
+# --- Configurations ---
 DATA_FILE = "inburi_bridge_data.json"
-NOTIFICATION_THRESHOLD = float(os.getenv("NOTIFICATION_THRESHOLD_M", "0.10"))
+
+# อ่าน threshold จาก env; หากไม่มีหรือไม่ใช่ตัวเลข ก็ใช้ default 0.10
+_raw = os.getenv("NOTIFICATION_THRESHOLD_M")
+try:
+    NOTIFICATION_THRESHOLD = float(_raw) if _raw else 0.10
+except ValueError:
+    print(f"--> ❗ WARN: ไม่สามารถแปลง NOTIFICATION_THRESHOLD_M='{_raw}' เป็น float, ใช้ default 0.10")
+    NOTIFICATION_THRESHOLD = 0.10
+
 LINE_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+
 
 def send_line_message(message: str):
     if not LINE_ACCESS_TOKEN:
@@ -28,6 +38,7 @@ def send_line_message(message: str):
     if resp.status_code != 200:
         print(f"--> ❌ ส่ง LINE ไม่สำเร็จ: {resp.status_code} {resp.text}")
 
+
 def setup_driver():
     chrome_options = Options()
     chrome_options.binary_location = os.getenv("CHROME_BIN", "/usr/bin/google-chrome-stable")
@@ -37,6 +48,7 @@ def setup_driver():
 
     service = Service(executable_path=os.getenv("CHROMEDRIVER_PATH", "/usr/bin/chromedriver"))
     return webdriver.Chrome(service=service, options=chrome_options)
+
 
 def get_water_data():
     driver = setup_driver()
@@ -71,37 +83,44 @@ def get_water_data():
     finally:
         driver.quit()
 
+
 def main():
-    print("--- เริ่มทำงาน inburi_bridge_alert.py ---")
+    try:
+        print("--- เริ่มทำงาน inburi_bridge_alert.py ---")
 
-    last_data = {}
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            last_data = json.load(f)
-        print(f"โหลดข้อมูลเก่า: {last_data}")
+        last_data = {}
+        if os.path.exists(DATA_FILE):
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                last_data = json.load(f)
+            print(f"โหลดข้อมูลเก่า: {last_data}")
 
-    data = get_water_data()
-    if not data:
-        print("--> ไม่มีข้อมูลใหม่, จบการทำงาน")
-        return
+        data = get_water_data()
+        if not data:
+            print("--> ไม่มีข้อมูลใหม่, จบการทำงาน")
+            return
 
-    if last_data.get("water_level") != data["water_level"]:
-        message = (
-            f"🌊 สถานี {data['station_name']}:\n"
-            f"• ระดับน้ำ: {data['water_level']} ม.เหนือระดับน้ำท่วม\n"
-            f"• ระดับตลิ่ง: {data['bank_level']} ม.\n"
-            f"• สถานะ: {data['status']}\n"
-            f"• ห่างจากตลิ่ง: {data['below_bank']} ม.\n"
-            f"🕒 เวลา: {data['time']}"
-        )
-        print(message)
-        send_line_message(message)
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    else:
-        print("--> ข้ามการแจ้งเตือน รอบนี้")
+        if last_data.get("water_level") != data["water_level"]:
+            message = (
+                f"🌊 สถานี {data['station_name']}:\n"
+                f"• ระดับน้ำ: {data['water_level']} ม.เหนือระดับน้ำท่วม\n"
+                f"• ระดับตลิ่ง: {data['bank_level']} ม.\n"
+                f"• สถานะ: {data['status']}\n"
+                f"• ห่างจากตลิ่ง: {data['below_bank']} ม.\n"
+                f"🕒 เวลา: {data['time']}"
+            )
+            print(message)
+            send_line_message(message)
 
-    print("--- จบ script ---")
+            with open(DATA_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        else:
+            print("--> ข้ามการแจ้งเตือน รอบนี้")
+
+        print("--- จบ script ---")
+    except Exception as e:
+        print(f"--> ❌ เกิดข้อผิดพลาด: {e}")
+        raise
+
 
 if __name__ == "__main__":
     main()

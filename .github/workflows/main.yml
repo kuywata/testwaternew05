@@ -1,47 +1,82 @@
-name: Water Level Scraper
+import os
+import re
+import requests
+from datetime import datetime, timedelta
+import pytz
+from bs4 import BeautifulSoup
 
-on:
-  workflow_dispatch:
-  schedule:
-    # ตรวจสอบทุก 5 นาที (ยังคงเหมือนเดิม)
-    - cron: '*/5 * * * *'
+# ─── ค่าคงที่ ──────────────────────────────────────────────────────
+GRAPH_URL                 = 'https://tiwrm.hii.or.th/DATA/REPORT/php/itc_zcgraph.php?id1=37'
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
+LINE_TARGET_ID            = os.environ.get('LINE_TARGET_ID')
+TIMEZONE_THAILAND         = pytz.timezone('Asia/Bangkok')
+HISTORICAL_LOG_FILE       = 'historical_log.csv'
+LAST_DATA_FILE            = 'last_data.txt'
 
-permissions:
-  contents: write
+def get_water_data():
+    """
+    ดึง HTML popup ของเขื่อนท้ายฯ มาตรงๆ
+    แล้ว parse <td class="text_bold" colspan="2">439.00/ … cms</td>
+    คืนค่า "439.00 cms"
+    """
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    resp = requests.get(GRAPH_URL, headers=headers, timeout=10)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, 'html.parser')
 
-jobs:
-  scrape:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+    cell = soup.select_one('td.text_bold[colspan="2"]')
+    if not cell:
+        raise RuntimeError("ไม่พบ <td class='text_bold' colspan='2'> ใน popup HTML")
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
+    raw = cell.get_text(strip=True)   # e.g. "439.00/2840cms" หรือ "439.00/ 2840 cms"
+    main = raw.split('/', 1)[0]       # "439.00"
+    num  = re.sub(r"[^\d.]", "", main)
+    if not num:
+        raise RuntimeError("ดึงตัวเลขไม่สำเร็จ จาก raw: " + raw)
+    return f"{num} cms"
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+def send_line_message(text):
+    url = 'https://api.line.me/v2/bot/message/push'
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'
+    }
+    payload = {'to': LINE_TARGET_ID, 'messages':[{'type':'text','text':text}]}
+    resp = requests.post(url, headers=headers, json=payload, timeout=10)
+    resp.raise_for_status()
 
-      - name: Run scraper script
-        env:
-          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-          LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
-        run: python scraper.py
+def main():
+    # อ่านค่าเดิม
+    try:
+        last = open(LAST_DATA_FILE, 'r', encoding='utf-8').read().strip()
+    except FileNotFoundError:
+        last = ''
 
-      - name: Commit and push if changed
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git pull
-          # เพิ่ม historical_log.csv เข้าไปใน git ด้วย
-          git add last_data.txt historical_log.csv
-          if ! git diff --staged --quiet; then
-            git commit -m "Update water data and historical log"
-            git push
-          else
-            echo "No changes to commit."
-          fi
+    # ดึงค่าปัจจุบัน
+    try:
+        current = get_water_data()
+    except Exception as e:
+        print("Error fetching data:", e)
+        return
+
+    # ถ้าค่าใหม่ไม่เท่าค่าเดิม ให้ส่ง LINE
+    if current != last:
+        now = datetime.now(TIMEZONE_THAILAND)
+        msg = (
+            f"🌊 แจ้งปล่อยน้ำท้ายเขื่อนเจ้าพระยา\n"
+            f"✅ ปัจจุบัน: {current}\n"
+            f"⬅️ ก่อนหน้า: {last or '–'}\n"
+            f"🗓️ {now.strftime('%d/%m/%Y %H:%M:%S')}"
+        )
+        send_line_message(msg)
+        # บันทึก
+        with open(LAST_DATA_FILE, 'w', encoding='utf-8') as f:
+            f.write(current)
+        with open(HISTORICAL_LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(f"{now.isoformat()},{current}\n")
+        print("ส่ง LINE และบันทึกสำเร็จ")
+    else:
+        print("ไม่มีการเปลี่ยนแปลง (ค่าเดิม = ค่าใหม่)")
+
+if __name__ == "__main__":
+    main()

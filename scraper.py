@@ -50,10 +50,8 @@ def get_historical_data(target_date):
             try:
                 timestamp_str, value = line.strip().split(',', 1)
                 log_date = datetime.fromisoformat(timestamp_str)
-                
                 if log_date.tzinfo is None:
                     log_date = TIMEZONE_THAILAND.localize(log_date)
-                
                 if start_range <= log_date <= end_range:
                     diff = abs(target_date - log_date)
                     if diff < smallest_diff:
@@ -112,10 +110,9 @@ def main():
         formatted_datetime = now_thailand.strftime("%d/%m/%Y %H:%M:%S")
         sponsor_line = "พื้นที่ผู้สนับสนุน..."
         
-        #
-        # --- โค้ดส่วนที่แก้ไข ---
-        # แก้ไขการย่อหน้าและนำ Backtick (`) ที่อาจก่อปัญหาออกไป
-        #
+        # --- โค้ดส่วนที่แก้ไขสมบูรณ์ ---
+        # 1. แก้ไขการย่อหน้าให้ถูกต้อง
+        # 2. นำ Backtick (`) ออกจากข้อความทั้งหมด
         message = (
             f"🌊 *แจ้งเตือนการปล่อยน้ำ เขื่อนเจ้าพระยา, ชัยนาท*\n"
             f"━━━━━━━━━━\n"

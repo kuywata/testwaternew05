@@ -4,6 +4,7 @@ import os
 import time
 from datetime import datetime
 import pytz
+import json # Import json for better state file management
 
 # --- General settings ---
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
@@ -14,19 +15,18 @@ OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY')
 LATITUDE = 15.02
 LONGITUDE = 100.34
 
-# State files
-LAST_FORECAST_ID_FILE = 'last_forecast_id.txt'
-LAST_ALERT_TIME_FILE = 'last_alert_time.txt'
+# State file (using JSON for better structure)
+STATE_FILE = 'weather_alert_state.json'
 
 # --- Alert Thresholds (ปรับค่าตรงนี้เพื่อเปลี่ยนความไวของการแจ้งเตือน) ---
 RAIN_CONF_THRESHOLD = 0.3    # โอกาสเกิดฝน ≥30%
-MIN_RAIN_MM = 10.0           # ปริมาณน้ำฝนคาดการณ์ ≥10 มม. ใน 3 ชั่วโมง
+MIN_RAIN_MM = 5.0           # ปริมาณน้ำฝนคาดการณ์ ≥5 มม. ใน 3 ชั่วโมง (Adjusted for potentially less strict alerts)
 HEAT_THRESHOLD = 35.0        # อุณหภูมิคาดการณ์ ≥35 °C
 
 # --- Lookahead & Cooldown Settings ---
 LOOKAHEAD_PERIODS = 24       # จำนวนรายการพยากรณ์ที่จะดึงมา (3-hour intervals)
-MAX_LEAD_HOURS = 6           # พิจารณาพยากรณ์ล่วงหน้าไม่เกิน 6 ชั่วโมง
-COOLDOWN_HOURS = 6           # รออย่างน้อย 6 ชั่วโมง ก่อนแจ้งเตือนเหตุการณ์ประเภทเดียวกันซ้ำ
+MAX_LEAD_HOURS = 12          # พิจารณาพยากรณ์ล่วงหน้าไม่เกิน 12 ชั่วโมง (Increased to catch events further out)
+COOLDOWN_HOURS = 4           # รออย่างน้อย 4 ชั่วโมง ก่อนแจ้งเตือนเหตุการณ์ประเภทเดียวกันซ้ำ (Adjusted cooldown)
 
 
 def get_weather_event():
@@ -54,7 +54,8 @@ def get_weather_event():
             forecast_time = datetime.utcfromtimestamp(entry['dt'])
             
             # พิจารณาเฉพาะพยากรณ์ในช่วง MAX_LEAD_HOURS เท่านั้น
-            if (forecast_time - now_utc).total_seconds() > MAX_LEAD_HOURS * 3600:
+            if (forecast_time - now_utc).total_seconds() > MAX_LEAD_HOURS * 3600 or \
+               (forecast_time - now_utc).total_seconds() < -1800: # Ignore past forecasts (with a 30 min buffer)
                 continue
 
             # ตรวจสอบเงื่อนไขฝนตกหนัก
@@ -74,7 +75,7 @@ def get_weather_event():
                 print(f"Found potential HEAT event at {forecast_time.isoformat()}Z")
                 return 'HEAT', entry
 
-        print("No significant weather events found within the next 6 hours.")
+        print("No significant weather events found within the next 12 hours.")
         return 'NO_EVENT', None
 
     except requests.exceptions.RequestException as e:
@@ -82,18 +83,22 @@ def get_weather_event():
         return None, None
 
 
-def read_file(path):
-    """Return content or empty string if missing."""
+def read_state(path):
+    """Return content of state file as dict or default if missing/invalid."""
     try:
         with open(path, 'r') as f:
-            return f.read().strip()
-    except FileNotFoundError:
-        return ''
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        # Default state: no alerts sent, no cooldowns
+        return {
+            'last_alert_times': {}, # Stores last alert timestamp per event type (e.g., {'RAIN': 1678886400})
+            'last_alerted_forecasts': {} # Stores {'event_type': {'dt': timestamp, 'value': float}}
+        }
 
 
-def write_file(path, content):
+def write_state(path, state_data):
     with open(path, 'w') as f:
-        f.write(str(content))
+        json.dump(state_data, f, indent=4)
 
 
 def format_message(event, forecast):
@@ -107,20 +112,19 @@ def format_message(event, forecast):
         desc = forecast['weather'][0].get('description', 'N/A')
         rain_mm = forecast.get('rain', {}).get('3h', 0)
         return (
-            f"⛈️ *แจ้งเตือนฝนตกหนัก*\n"
+            f"⛈️ *แจ้งเตือน: ฝนตกหนัก*\n"
             f"พื้นที่: อ.อินทร์บุรี จ.สิงห์บุรี\n"
-            f"ลักษณะอากาศ: {desc}\n"
-            f"ปริมาณฝนคาดการณ์: ~{rain_mm:.1f} มม./3ชม.\n"
-            f"ช่วงเวลา: {dt_local_str}"
+            f"คาดการณ์: {desc}, ปริมาณฝน ~{rain_mm:.1f} มม./3ชม.\n"
+            f"เวลา: {dt_local_str}"
         )
 
     # HEAT
     tmax = forecast['main'].get('temp_max')
     return (
-        f"🌡️ *แจ้งเตือนอากาศร้อนจัด*\n"
+        f"🌡️ *แจ้งเตือน: อากาศร้อนจัด*\n"
         f"พื้นที่: อ.อินทร์บุรี จ.สิงห์บุรี\n"
-        f"อุณหภูมิสูงสุดคาดการณ์: {tmax:.1f} °C\n"
-        f"ช่วงเวลา: {dt_local_str}"
+        f"คาดการณ์: อุณหภูมิสูงสุด {tmax:.1f} °C\n"
+        f"เวลา: {dt_local_str}"
     )
 
 
@@ -133,7 +137,7 @@ def send_line(msg):
                      .strftime('%d/%m/%Y %H:%M:%S')
     payload = {
         'to': LINE_TARGET_ID,
-        'messages': [{'type': 'text', 'text': f"{msg}\n\n(อัปเดตเมื่อ: {timestamp})"}]
+        'messages': [{'type': 'text', 'text': f"{msg}\n\n(อัปเดต: {timestamp})"}]
     }
     headers = {
         'Content-Type': 'application/json',
@@ -152,36 +156,54 @@ def send_line(msg):
 
 
 def main():
-    last_id = read_file(LAST_FORECAST_ID_FILE)
-    last_alert_time = float(read_file(LAST_ALERT_TIME_FILE) or 0)
+    state = read_state(STATE_FILE)
+    last_alert_times = state.get('last_alert_times', {})
+    last_alerted_forecasts = state.get('last_alerted_forecasts', {})
 
     event, forecast = get_weather_event()
-    if event is None or event == 'NO_EVENT':
+    if event is None: # Error case
+        return
+    if event == 'NO_EVENT':
+        # If no significant event is found, we should clear any 'last alerted forecast'
+        # for events that are now in the past or no longer meet criteria.
+        # This prevents old, irrelevant forecast data from blocking future alerts.
+        # We don't clear cooldowns, as we want to prevent spam if the same event type reappears.
+        print("No significant weather events found. State will not be updated for alerts.")
         return
 
-    # สร้าง ID ของเหตุการณ์ปัจจุบันที่ไม่ซ้ำกัน
-    value = (forecast.get('rain', {}).get('3h', 0)
-             if event == 'RAIN'
-             else forecast['main'].get('temp_max'))
-    current_id = f"{event}:{forecast['dt']}:{value:.1f}"
+    forecast_dt = forecast['dt'] # Unix timestamp of the forecast
+    forecast_value = (forecast.get('rain', {}).get('3h', 0)
+                      if event == 'RAIN'
+                      else forecast['main'].get('temp_max'))
+
     now = time.time()
-
-    prev_event_type = last_id.split(':')[0] if ':' in last_id else None
-
-    if current_id == last_id:
-        print(f"Event '{current_id}' is unchanged. No alert needed.")
-        return
-
-    # ตรวจสอบ Cooldown เฉพาะเมื่อประเภทเหตุการณ์เหมือนกับครั้งล่าสุด
-    if event == prev_event_type and now < last_alert_time + COOLDOWN_HOURS * 3600:
+    
+    # Check for cooldown for the specific event type
+    if event in last_alert_times and now < last_alert_times[event] + COOLDOWN_HOURS * 3600:
         print(f"Event type '{event}' is in {COOLDOWN_HOURS}-hour cooldown. No alert needed.")
         return
-        
-    print(f"New event detected: {current_id}. Preparing to send alert.")
+
+    # Check if this exact forecast (time and value) was already alerted
+    # This prevents re-alerting the exact same forecast if it's fetched again before cooldown.
+    last_alerted_for_event = last_alerted_forecasts.get(event)
+    if last_alerted_for_event:
+        if last_alerted_for_event['dt'] == forecast_dt and \
+           abs(last_alerted_for_event['value'] - forecast_value) < 0.1: # Small tolerance for float comparison
+            print(f"Forecast for {event} at {datetime.utcfromtimestamp(forecast_dt).isoformat()}Z "
+                  f"with value {forecast_value:.1f} was already alerted. No new alert needed.")
+            return
+
+    # If we reached here, it's either a new event type, a new forecast for an existing type,
+    # or the cooldown has expired.
+    print(f"New or updated event detected: {event} at {datetime.utcfromtimestamp(forecast_dt).isoformat()}Z. Preparing to send alert.")
     message = format_message(event, forecast)
     if send_line(message):
-        write_file(LAST_ALERT_TIME_FILE, now)
-        write_file(LAST_FORECAST_ID_FILE, current_id)
+        state['last_alert_times'][event] = now
+        state['last_alerted_forecasts'][event] = {
+            'dt': forecast_dt,
+            'value': forecast_value
+        }
+        write_state(STATE_FILE, state)
         print("Alert sent and state has been updated.")
     else:
         print("Alert failed to send. State will not be updated.")

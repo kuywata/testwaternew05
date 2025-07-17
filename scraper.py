@@ -1,7 +1,7 @@
 import os
 import re
 import requests
-from bs4 import BeautifulSoup
+import json
 from datetime import datetime, timedelta
 import pytz
 
@@ -16,7 +16,8 @@ LAST_DATA_FILE = 'last_data.txt'
 
 def get_water_data(timeout=30):
     """
-    ดึงข้อมูลปริมาณน้ำ และเพิ่มส่วนดีบักเพื่อพิมพ์ HTML ที่ได้รับออกมาดู
+    ดึงข้อมูลจาก JSON ที่ฝังอยู่ใน JavaScript ของหน้าเว็บ
+    ซึ่งเป็นวิธีที่เสถียรและแม่นยำที่สุด
     """
     try:
         headers = {
@@ -24,41 +25,37 @@ def get_water_data(timeout=30):
         }
         response = requests.get(URL, headers=headers, timeout=timeout)
         response.raise_for_status()
+        response.encoding = 'utf-8' # ระบุ encoding เป็น utf-8
         
-        # เพิ่มการระบุ encoding เพื่อความถูกต้องของภาษาไทย
-        response.encoding = response.apparent_encoding
-        soup = BeautifulSoup(response.text, 'html.parser')
-
-        label_cell = soup.find('td', string='ปริมาณน้ำ')
-
-        if not label_cell:
-            print("Error: ไม่พบป้ายกำกับ 'ปริมาณน้ำ' ในหน้าเว็บ (อาจเป็นเพราะ HTML เปลี่ยนแปลง)")
-            # --- ส่วนดีบักที่เพิ่มเข้ามา ---
-            print("\n" + "="*20 + " DEBUG: RAW HTML CONTENT " + "="*20)
-            print(soup.prettify())
-            print("="*24 + " END OF HTML CONTENT " + "="*23 + "\n")
-            # ---------------------------
-            return None
-
-        data_cell = label_cell.find_next_sibling('td')
-
-        if not data_cell:
-            print("Error: ไม่พบช่องข้อมูลที่อยู่ถัดจากป้ายกำกับ")
-            return None
-
-        raw_text = data_cell.get_text(strip=True)
+        # 1. ค้นหาข้อมูล JSON ที่อยู่ในตัวแปรชื่อ "json_data" จากเนื้อหาของหน้าเว็บ
+        match = re.search(r'var json_data = (\[.*\]);', response.text)
         
-        if "/" in raw_text:
-            main_value = raw_text.split('/')[0].strip()
-            num = re.sub(r"[^\d.]", "", main_value)
-            if num:
-                return f"{num} cms"
+        if not match:
+            print("Error: ไม่พบข้อมูล JSON (ตัวแปร json_data) ในหน้าเว็บ")
+            return None
+            
+        # 2. แปลงข้อความ JSON ที่หาเจอให้กลายเป็น Dictionary ของ Python
+        json_string = match.group(1)
+        data = json.loads(json_string)
+        
+        # 3. ดึงค่าที่ต้องการจากโครงสร้าง JSON โดยตรง
+        # data[0] -> itc_water -> C13 -> storage
+        water_storage = data[0]['itc_water']['C13']['storage']
+        
+        if water_storage:
+            return f"{water_storage} cms"
 
     except requests.exceptions.RequestException as e:
         print(f"เกิดข้อผิดพลาดในการดึง URL: {e}")
         return None
+    except (KeyError, IndexError):
+        print("Error: ไม่พบ Key 'C13' หรือ 'storage' ในโครงสร้าง JSON")
+        return None
+    except json.JSONDecodeError:
+        print("Error: ไม่สามารถแปลงข้อมูลที่ได้มาเป็น JSON")
+        return None
     except Exception as e:
-        print(f"เกิดข้อผิดพลาดระหว่างการวิเคราะห์ข้อมูล: {e}")
+        print(f"เกิดข้อผิดพลาดที่ไม่คาดคิด: {e}")
         return None
 
     print("Error: ไม่พบข้อมูลปริมาณน้ำในรูปแบบที่คาดไว้")

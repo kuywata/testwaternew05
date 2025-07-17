@@ -16,11 +16,16 @@ LAST_DATA_FILE = 'last_data.txt'
 
 def get_water_data(timeout=30):
     """
-    ดึงข้อมูลปริมาณน้ำโดยใช้ 'ปริมาณน้ำ' เป็นจุดอ้างอิง แล้วหาข้อมูลจาก element ที่อยู่ถัดไป
-    ซึ่งเป็นวิธีที่เจาะจงและเสถียรมาก
+    ดึงข้อมูลปริมาณน้ำโดยใช้ 'ปริมาณน้ำ' เป็นจุดอ้างอิง และเพิ่ม User-Agent
+    เพื่อปลอมตัวเป็นเบราว์เซอร์ ทำให้ได้รับข้อมูลเว็บฉบับเต็ม
     """
     try:
-        response = requests.get(URL, timeout=timeout)
+        # **ส่วนที่เพิ่มเข้ามา: ปลอมตัวเป็นเบราว์เซอร์**
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        # เพิ่ม headers เข้าไปในคำขอ
+        response = requests.get(URL, headers=headers, timeout=timeout)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
 
@@ -28,7 +33,7 @@ def get_water_data(timeout=30):
         label_cell = soup.find('td', string='ปริมาณน้ำ')
 
         if not label_cell:
-            print("Error: ไม่พบป้ายกำกับ 'ปริมาณน้ำ' ในหน้าเว็บ")
+            print("Error: ไม่พบป้ายกำกับ 'ปริมาณน้ำ' ในหน้าเว็บ (อาจเป็นเพราะ HTML เปลี่ยนแปลง)")
             return None
 
         # 2. ข้อมูลตัวเลขจะอยู่ใน <td> ถัดไป (next sibling)
@@ -38,13 +43,12 @@ def get_water_data(timeout=30):
             print("Error: ไม่พบช่องข้อมูลที่อยู่ถัดจากป้ายกำกับ")
             return None
 
-        # 3. ดึงข้อความออกมา ซึ่งจะมีรูปแบบ "439.00/ 2840 cms"
+        # 3. ดึงข้อความออกมา
         raw_text = data_cell.get_text(strip=True)
         
         # 4. แยกข้อมูลส่วนหน้าเครื่องหมาย / ออกมา
         if "/" in raw_text:
             main_value = raw_text.split('/')[0].strip()
-            # คัดกรองให้เหลือแต่ตัวเลขและจุดทศนิยม
             num = re.sub(r"[^\d.]", "", main_value)
             if num:
                 return f"{num} cms"

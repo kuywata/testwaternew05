@@ -1,10 +1,18 @@
-# ใส่โค้ดนี้แทนที่ฟังก์ชัน get_water_data เดิมในไฟล์ scraper.py
-
+import os
+import re
 import requests
 from bs4 import BeautifulSoup
-import re
+from datetime import datetime, timedelta
+import pytz
 
-# ... (ส่วนค่าคงที่อื่นๆ ด้านบนคงไว้เหมือนเดิม) ...
+# --- ค่าคงที่ ---
+URL = 'https://tiwrm.hii.or.th/DATA/REPORT/php/chart/chaopraya/small/chaopraya.php'
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
+LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
+TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
+HISTORICAL_LOG_FILE = 'historical_log.csv'
+LAST_DATA_FILE = 'last_data.txt'
+
 
 def get_water_data(timeout=30):
     """
@@ -12,42 +20,31 @@ def get_water_data(timeout=30):
     แล้วจึงค้นหาข้อมูลจากโครงสร้าง HTML ที่อยู่ถัดไป ทำให้มีความแม่นยำและเสถียรสูง
     """
     try:
-        # ใช้ requests เพื่อดึงหน้า HTML มาโดยตรง
         response = requests.get(URL, timeout=timeout)
-        response.raise_for_status()  # ตรวจสอบว่าดึงข้อมูลสำเร็จ
+        response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
 
-        # 1. หา tag ที่มีข้อความ "ที่ท้ายเขื่อนเจ้าพระยา" เพื่อใช้เป็นจุดอ้างอิง
         anchor_tag = soup.find('strong', string='ที่ท้ายเขื่อนเจ้าพระยา')
-
         if not anchor_tag:
             print("Error: ไม่พบจุดอ้างอิง 'ที่ท้ายเขื่อนเจ้าพระยา' ในหน้าเว็บ")
             return None
 
-        # 2. ข้อมูลที่ต้องการอยู่ในแถว (tr) ถัดไป
         data_row = anchor_tag.find_parent('tr').find_next_sibling('tr')
-
         if not data_row:
             print("Error: ไม่พบแถวของข้อมูลที่อยู่ถัดจากจุดอ้างอิง")
             return None
 
-        # 3. ในแถวนั้น ให้หาช่อง (td) ที่มีข้อมูลปริมาณน้ำ
         data_cell = data_row.find('td', class_='text_bold')
-
         if not data_cell:
             print("Error: ไม่พบช่องของข้อมูล (td.text_bold)")
             return None
 
-        # 4. ดึงข้อความออกมา ซึ่งจะมีรูปแบบ "439.00/ 2840 cms"
         raw_text = data_cell.get_text(strip=True)
-
-        # 5. แยกข้อมูลส่วนหน้าเครื่องหมาย / ออกมา
         if "/" in raw_text:
             main_value = raw_text.split('/')[0].strip()
-            # คัดกรองให้เหลือแต่ตัวเลขและจุดทศนิยม
             num = re.sub(r"[^\d.]", "", main_value)
             if num:
-                return f"{num} cms" # คืนค่าเป็น "439.00 cms"
+                return f"{num} cms"
 
     except requests.exceptions.RequestException as e:
         print(f"เกิดข้อผิดพลาดในการดึง URL: {e}")
@@ -59,4 +56,85 @@ def get_water_data(timeout=30):
     print("Error: ไม่พบข้อมูลปริมาณน้ำในรูปแบบที่คาดไว้")
     return None
 
-# ... (ฟังก์ชันอื่นๆ ที่เหลือในไฟล์คงไว้เหมือนเดิม) ...
+
+def get_historical_data(target_date):
+    if not os.path.exists(HISTORICAL_LOG_FILE):
+        return None
+    start = target_date - timedelta(hours=12)
+    end = target_date + timedelta(hours=12)
+    best, best_diff = None, timedelta.max
+    with open(HISTORICAL_LOG_FILE, 'r', encoding='utf-8') as f:
+        for line in f:
+            try:
+                ts, val = line.strip().split(",", 1)
+                dt = datetime.fromisoformat(ts)
+                if dt.tzinfo is None:
+                    dt = TIMEZONE_THAILAND.localize(dt)
+                diff = abs(target_date - dt)
+                if start <= dt <= end and diff < best_diff:
+                    best_diff, best = diff, val
+            except ValueError:
+                continue
+    return best
+
+
+def append_to_historical_log(now, data):
+    with open(HISTORICAL_LOG_FILE, 'a', encoding='utf-8') as f:
+        f.write(f"{now.isoformat()},{data}\n")
+
+
+def send_line_message(message):
+    if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_TARGET_ID:
+        print("Missing LINE credentials.")
+        return
+    url = 'https://api.line.me/v2/bot/message/push'
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'
+    }
+    payload = {
+        'to': LINE_TARGET_ID,
+        'messages': [{'type': 'text', 'text': message}]
+    }
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=10)
+        resp.raise_for_status()
+        print("ส่งข้อความ LINE สำเร็จ:", resp.status_code)
+    except Exception as e:
+        print("ส่งข้อความ LINE ไม่สำเร็จ:", e)
+
+
+def main():
+    last = ''
+    if os.path.exists(LAST_DATA_FILE):
+        last = open(LAST_DATA_FILE, 'r', encoding='utf-8').read().strip()
+
+    current = get_water_data()
+    if not current:
+        print("ไม่สามารถดึงค่าปัจจุบันได้ จึงไม่มีการแจ้งเตือน")
+        return
+
+    print("ค่าปัจจุบัน:", current)
+    now_th = datetime.now(TIMEZONE_THAILAND)
+
+    hist = get_historical_data(now_th - timedelta(days=365))
+    hist_str = f"\n\nเทียบปีที่แล้ว ({(now_th - timedelta(days=365)).strftime('%d/%m/%Y')}): {hist}" if hist else ''
+
+    msg = (
+        f"🌊 แจ้งเตือนปริมาณน้ำ เขื่อนเจ้าพระยา\n"
+        f"━━━━━━━━━━\n"
+        f"✅ ปัจจุบัน: {current}\n"
+        f"⬅️ เดิม: {last or 'ไม่พบ'}\n"
+        f"🗓️ {now_th.strftime('%d/%m/%Y %H:%M')}"
+        f"{hist_str}"
+    )
+    send_line_message(msg)
+
+    with open(LAST_DATA_FILE, 'w', encoding='utf-8') as f:
+        f.write(current)
+    append_to_historical_log(now_th, current)
+    print("อัปเดต historical log เรียบร้อย")
+
+
+if __name__ == "__main__":
+    main()

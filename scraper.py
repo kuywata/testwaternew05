@@ -15,11 +15,11 @@ TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 HISTORICAL_LOG_FILE = 'historical_log.csv'
 LAST_DATA_FILE = 'last_data.txt'
 
-# --- ฟังก์ชันดึงข้อมูล (ปรับปรุงให้ยืดหยุ่นขึ้น) ---
+# --- ฟังก์ชันดึงข้อมูล (เวอร์ชันแก้ไข 최종) ---
 def get_water_data():
     """
-    ดึงข้อมูล "ปริมาณน้ำ" จากตารางบนหน้าเว็บ
-    โดยใช้วิธีค้นหาจากข้อความ "ปริมาณน้ำ" ที่มีความเสถียรสูง
+    ดึงข้อมูล "ปริมาณน้ำ" โดยใช้ Regular Expression ค้นหาใน HTML ทั้งหมด
+    เพื่อความแม่นยำและทนทานต่อการเปลี่ยนแปลงสูงสุด
     """
     try:
         timestamp = int(time.time())
@@ -27,22 +27,15 @@ def get_water_data():
         response = requests.get(url_with_cache_bust, timeout=15)
         response.raise_for_status()
         
-        soup = BeautifulSoup(response.text, 'html.parser')
+        # ใช้วิธีค้นหาจาก pattern ของข้อความโดยตรง ซึ่งแม่นยำที่สุด
+        # Pattern คือ: หา "ปริมาณน้ำ", ตามด้วย HTML tag, และดึงกลุ่มตัวเลขแรกสุดออกมา
+        match = re.search(r'ปริมาณน้ำ\s*<\/td>\s*<td[^>]*>([0-9.]+)', response.text)
         
-        # 1. ค้นหา <td> ที่มีข้อความว่า "ปริมาณน้ำ"
-        header_td = soup.find('td', string='ปริมาณน้ำ')
-        
-        if header_td:
-            # 2. ค้นหา <td> ที่อยู่ถัดไป ซึ่งเป็นที่เก็บค่าปริมาณน้ำ
-            value_td = header_td.find_next_sibling('td')
-            if value_td:
-                # 3. ดึงข้อความและตัดส่วนที่ไม่ต้องการออก
-                raw_text = value_td.get_text(strip=True)
-                water_value = raw_text.split('/')[0].strip()
-                if water_value:
-                    return f"{water_value} cms"
+        if match:
+            water_value = match.group(1)
+            return f"{water_value} cms"
                     
-        print("Could not find the water data value in the HTML table using the flexible method.")
+        print("Could not find the water data value using Regex.")
         return None
 
     except Exception as e:
@@ -53,13 +46,10 @@ def get_water_data():
 def get_historical_data(target_date):
     if not os.path.exists(HISTORICAL_LOG_FILE):
         return None
-    
     start_range = target_date - timedelta(hours=12)
     end_range = target_date + timedelta(hours=12)
-    
     closest_entry = None
     smallest_diff = timedelta.max
-
     with open(HISTORICAL_LOG_FILE, 'r', encoding='utf-8') as f:
         for line in f:
             try:
@@ -74,7 +64,6 @@ def get_historical_data(target_date):
                         closest_entry = value
             except ValueError:
                 continue
-                
     return closest_entry
 
 def append_to_historical_log(now, data):
@@ -86,17 +75,9 @@ def send_line_message(message):
     if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_TARGET_ID:
         print("Missing LINE credentials.")
         return
-        
     url = 'https://api.line.me/v2/bot/message/push'
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'
-    }
-    payload = {
-        'to': LINE_TARGET_ID,
-        'messages': [{'type':'text','text':message}]
-    }
-    
+    headers = { 'Content-Type': 'application/json', 'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}' }
+    payload = { 'to': LINE_TARGET_ID, 'messages': [{'type':'text','text':message}] }
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=10)
         print(f"LINE API Response Status: {response.status_code}")
@@ -112,27 +93,20 @@ def main():
     if os.path.exists(LAST_DATA_FILE):
         with open(LAST_DATA_FILE, 'r', encoding='utf-8') as f:
             last_data = f.read().strip()
-            
     current_data = get_water_data()
-    
     if current_data:
         print(f"Current data retrieved: {current_data}")
-        
         now_thailand = datetime.now(TIMEZONE_THAILAND)
-        
         last_year_date = now_thailand - timedelta(days=365)
         historical_data = get_historical_data(last_year_date)
-        
         historical_text = ""
         if historical_data:
             last_year_date_str = last_year_date.strftime("%d/%m/%Y")
             historical_text = f"\n\nเทียบกับปีที่แล้ว ({last_year_date_str})\nค่าน้ำอยู่ที่: {historical_data}"
         else:
             print("Historical data not found for last year.")
-        
         formatted_datetime = now_thailand.strftime("%d/%m/%Y %H:%M:%S")
         sponsor_line = "พื้นที่ผู้สนับสนุน..."
-        
         message = (
             f"🌊 *แจ้งเตือนการปล่อยน้ำ เขื่อนเจ้าพระยา, ชัยนาท*\n"
             f"━━━━━━━━━━\n"
@@ -143,15 +117,11 @@ def main():
             f"{historical_text}\n\n"
             f"{sponsor_line}"
         )
-
         send_line_message(message)
-        
         with open(LAST_DATA_FILE, 'w', encoding='utf-8') as f:
             f.write(current_data)
-        
         append_to_historical_log(now_thailand, current_data)
         print("Appended new data to historical log and updated last_data.txt.")
-        
     else:
         print("Could not retrieve current data. No notification sent.")
 

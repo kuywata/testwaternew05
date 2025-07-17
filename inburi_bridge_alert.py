@@ -31,13 +31,11 @@ def send_line_message(message: str):
 
 def setup_driver():
     chrome_options = Options()
-    # ใช้ไบนารีของ Google Chrome ที่ติดตั้งจาก .deb
     chrome_options.binary_location = os.getenv("CHROME_BIN", "/usr/bin/google-chrome-stable")
     chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
 
-    # ชี้ไปยัง Chromedriver ที่ติดตั้งด้วย APT
     service = Service(executable_path=os.getenv("CHROMEDRIVER_PATH", "/usr/bin/chromedriver"))
     driver = webdriver.Chrome(service=service, options=chrome_options)
     return driver
@@ -55,8 +53,8 @@ def get_water_data():
             return None
 
         for row in table.find_all("tr"):
-            cols = row.find_all("td")
             th = row.find("th")
+            cols = row.find_all("td")
             if th and "อินทร์บุรี" in th.text and len(cols) >= 3:
                 water_level = float(cols[1].text.strip())
                 bank_level = float(cols[2].text.strip())
@@ -89,7 +87,6 @@ def main():
         print("--> ไม่มีข้อมูลใหม่, จบการทำงาน")
         return
 
-    # ถ้าค่าระดับน้ำเปลี่ยน แสดงว่าส่งแจ้งเตือนใหม่
     if last_data.get("water_level") != data["water_level"]:
         message = (
             f"🌊 สถานี {data['station_name']}:\n"
@@ -101,7 +98,6 @@ def main():
         )
         print(message)
         send_line_message(message)
-
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     else:

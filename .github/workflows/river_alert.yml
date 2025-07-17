@@ -2,7 +2,6 @@ name: River Alert
 
 on:
   schedule:
-    # รันทุก 15 นาที ปรับตามต้องการ
     - cron: '*/15 * * * *'
   workflow_dispatch:
 
@@ -10,11 +9,10 @@ jobs:
   alert:
     runs-on: ubuntu-latest
     env:
-      # ชี้ไปยังไบนารี Chrome และ Chromedriver
       CHROME_BIN: /usr/bin/google-chrome-stable
       CHROMEDRIVER_PATH: /usr/bin/chromedriver
-      # นำค่า Token และ Threshold มาจาก GitHub secrets
       LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+      LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
       NOTIFICATION_THRESHOLD_M: ${{ secrets.NOTIFICATION_THRESHOLD_M }}
     steps:
       - name: Checkout repository
@@ -29,10 +27,10 @@ jobs:
         run: |
           sudo apt-get update
 
-          # ติดตั้งเฉพาะ Chromedriver จาก APT ปกติ (ข้าม snap)
-          sudo apt-get install -y chromium-chromedriver wget
+          # ติดตั้ง wget และ Chromedriver โดยไม่ดึง chromium-browser (snap) มา
+          sudo apt-get install -y --no-install-recommends wget chromium-chromedriver
 
-          # ติดตั้ง Google Chrome Stable จาก .deb (ไม่ใช้ snap)
+          # ดาวน์โหลดและติดตั้ง Google Chrome Stable (.deb ไม่ใช้ snap)
           wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
           sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
 

@@ -1,40 +1,51 @@
-name: Inburi River Alert (API FINAL)
-
-permissions:
-  contents: write
+name: Check In Buri River Level
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '15 * * * *'
+
+permissions:
+  contents: write
 
 jobs:
-  alert:
+  scrape:
     runs-on: ubuntu-latest
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-
     steps:
-      - name: Checkout repository
+      - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.x'
+          python-version: '3.10'
+
+      # --- ส่วนที่เพิ่มเข้ามาสำหรับ Selenium ---
+      - name: Install Google Chrome
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+      # --- จบส่วนที่เพิ่ม ---
 
       - name: Install dependencies
-        run: pip install requests
-
-      - name: Run alert script
-        run: python inburi_bridge_alert.py
-
-      - name: Commit updated data file
         run: |
-          git config --local user.name "GitHub Action"
-          git config --local user.email "action@github.com"
-          git add inburi_bridge_data.json
-          git diff --staged --quiet || (
-            git commit -m "Update river level data" && git push
-          )
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run In Buri scraper script
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
+        run: python inburi_scraper.py
+
+      - name: Commit and push if changed
+        run: |
+          if [ -f last_inburi_data.txt ]; then
+            git config --local user.email "action@github.com"
+            git config --local user.name "GitHub Action"
+            git pull
+            git add last_inburi_data.txt
+            git diff --quiet && git diff --staged --quiet || (git commit -m "Update In Buri river data" && git push)
+          else
+            echo "last_inburi_data.txt not found, skipping commit."
+          fi

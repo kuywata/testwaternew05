@@ -1,4 +1,4 @@
-name: Inburi River Alert (API Version)
+name: Inburi River Alert (FINAL)
 
 permissions:
   contents: write
@@ -25,17 +25,23 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Install System Dependencies (Chromium Browser)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser
+
+      - name: Install Python Libraries
+        run: |
+          pip install requests selenium webdriver-manager
 
       - name: Run alert script
         run: python inburi_bridge_alert.py
 
       - name: Commit updated data file
         run: |
-          git config --local user.name  "GitHub Action"
+          git config --local user.name "GitHub Action"
           git config --local user.email "action@github.com"
           git add inburi_bridge_data.json
           git diff --staged --quiet || (
-            git commit -m "Update river level data (API)" && git push
+            git commit -m "Update river level data" && git push
           )

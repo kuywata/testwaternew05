@@ -15,7 +15,7 @@ TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 HISTORICAL_LOG_FILE = 'historical_log.csv'
 LAST_DATA_FILE = 'last_data.txt'
 
-# --- ฟังก์ชันดึงข้อมูล (เขียนใหม่ทั้งหมด) ---
+# --- ฟังก์ชันดึงข้อมูล (เขียนใหม่) ---
 def get_water_data():
     """
     ดึงข้อมูล "ปริมาณน้ำ" จากตารางบนหน้าเว็บโดยตรง
@@ -28,18 +28,16 @@ def get_water_data():
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # ค้นหา <td> ที่มีข้อความว่า "ปริมาณน้ำ"
-        header_td = soup.find('td', string=lambda text: text and 'ปริมาณน้ำ' in text)
+        # --- โค้ดที่ปรับปรุง ---
+        # ค้นหา <td> ที่มี class='text_bold' และ colspan='2' ซึ่งเป็นช่องที่เก็บข้อมูลโดยตรง
+        value_td = soup.find('td', class_='text_bold', colspan='2')
         
-        if header_td:
-            # ค้นหา <td> ที่อยู่ถัดไป ซึ่งเป็นที่เก็บค่าปริมาณน้ำ
-            value_td = header_td.find_next_sibling('td')
-            if value_td:
-                # ดึงข้อความและตัดส่วนที่ไม่ต้องการ (เช่น " /") ออก
-                raw_text = value_td.get_text(strip=True)
-                water_value = raw_text.split('/')[0].strip()
-                if water_value:
-                    return f"{water_value} cms"
+        if value_td:
+            # ดึงข้อความและตัดส่วนที่ไม่ต้องการ (เช่น " /") ออก
+            raw_text = value_td.get_text(strip=True)
+            water_value = raw_text.split('/')[0].strip()
+            if water_value:
+                return f"{water_value} cms"
                     
         print("Could not find the water data value in the HTML table.")
         return None

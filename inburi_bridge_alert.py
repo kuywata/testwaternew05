@@ -10,6 +10,7 @@ from selenium.webdriver.chrome.service import Service
 
 # --- Constants and configuration ---
 DATA_FILE = "inburi_bridge_data.json"
+# NOTIFICATION_THRESHOLD in meters (e.g., 0.10 for 10 cm)
 NOTIFICATION_THRESHOLD = float(os.getenv("NOTIFICATION_THRESHOLD_M", "0.10"))
 LINE_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 
@@ -102,8 +103,12 @@ def main():
     last_data = {}
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
-            last_data = json.load(f)
-            print(f"โหลดข้อมูลเก่า: {last_data}")
+            try:
+                last_data = json.load(f)
+                print(f"โหลดข้อมูลเก่า: {last_data}")
+            except json.JSONDecodeError:
+                print("--> ⚠️ ไฟล์ข้อมูลเก่าเสีย, เริ่มใหม่")
+                last_data = {}
 
     data = get_water_data()
     if not data:
@@ -112,6 +117,8 @@ def main():
 
     notify = False
     reasons = []
+
+    # Check for initial run or significant water level change
     if "water_level" not in last_data:
         notify = True
         reasons.append("แจ้งครั้งแรก")
@@ -120,11 +127,19 @@ def main():
         if diff >= NOTIFICATION_THRESHOLD:
             notify = True
             reasons.append(f"ระดับน้ำเปลี่ยน {diff*100:.0f} ซม.")
-        last_crit = any(k in last_data.get("status", "") for k in ["สูง", "ล้น", "วิกฤต"])
-        curr_crit = any(k in data["status"] for k in ["สูง", "ล้น", "วิกฤต"])
+        
+        # Check for change in critical status
+        critical_statuses = ["สูง", "ล้น", "วิกฤต"]
+        last_crit = any(k in last_data.get("status", "") for k in critical_statuses)
+        curr_crit = any(k in data["status"] for k in critical_statuses)
+
         if curr_crit and not last_crit:
             notify = True
             reasons.append("สถานะเปลี่ยนเป็นวิกฤต")
+        elif not curr_crit and last_crit:
+            notify = True
+            reasons.append("สถานะพ้นวิกฤต")
+        # If both are critical or both are not critical, no status change trigger unless water level changes significantly
 
     if not reasons:
         reasons.append("การเปลี่ยนแปลงไม่ถึงเกณฑ์")
@@ -134,31 +149,37 @@ def main():
     if notify:
         is_critical = any(k in data["status"] for k in ["สูง", "ล้น", "วิกฤต"])
         icon = "🚨" if is_critical else "✅"
-        summary_text = (
-            f"สูงกว่าตลิ่งอยู่ *{abs(data['below_bank']):.2f}* ม." if is_critical
-            else f"ต่ำกว่าตลิ่งอยู่ *{data['below_bank']:.2f}* ม."
-        )
+        
+        # Determine summary text based on below_bank value
+        summary_text = ""
+        if data['below_bank'] < 0: # This means it's above bank level, as below_bank is negative
+            summary_text = f"สูงกว่าตลิ่ง *{abs(data['below_bank']):.2f}* ม."
+        else:
+            summary_text = f"ต่ำกว่าตลิ่ง *{data['below_bank']:.2f}* ม."
 
         comparison_text = ""
         if "water_level" in last_data:
             level_diff = data["water_level"] - last_data["water_level"]
             trend_icon = "📈" if level_diff > 0 else "📉" if level_diff < 0 else "↔️"
-            trend_sign = "+" if level_diff > 0 else ""
+            trend_word = "ขึ้น" if level_diff > 0 else "ลง" if level_diff < 0 else "คงที่"
+            
+            # Only show numerical change if it's not "คงที่" and is significant
+            if level_diff != 0:
+                trend_change = f" ({'+' if level_diff > 0 else ''}{level_diff:.2f} ม.)"
+            else:
+                trend_change = ""
+
             comparison_text = (
-                f"⬅️ ระดับน้ำเดิม: *{last_data['water_level']:.2f}* ม.รทก.\n\n"
-                f"{trend_icon} แนวโน้ม: *น้ำ{'ขึ้น' if level_diff > 0 else 'ลง' if level_diff < 0 else 'คงที่'}* ({trend_sign}{level_diff:.2f} ม.)"
+                f"⬅️ เดิม: *{last_data['water_level']:.2f}* ม.รทก.\n"
+                f"{trend_icon} แนวโน้ม: *น้ำ{trend_word}*{trend_change}"
             )
 
         message = (
-            f"💧 **รายงานระดับน้ำ**\n"
-            f"📍 สถานี: {data['station_name']}\n"
-            f"──────────────────\n"
-            f"🌊 ระดับน้ำปัจจุบัน: *{data['water_level']:.2f}* ม.รทก.\n"
-            f"{comparison_text}\n\n"
-            f"📊 สถานะ: {icon} *{data['status']}*\n"
-            f"       ({summary_text})\n"
-            f"──────────────────\n"
-            f"🗓️ ข้อมูล ณ เวลา: {data['time']}"
+            f"💧 **รายงานระดับน้ำ อินทร์บุรี**\n"
+            f"🌊 ระดับปัจจุบัน: *{data['water_level']:.2f}* ม.รทก.\n"
+            f"{comparison_text}\n"
+            f"📊 สถานะ: {icon} *{data['status']}* ({summary_text})\n"
+            f"⏰ ณ: {data['time']}"
         )
 
         print(message)

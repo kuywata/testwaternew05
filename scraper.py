@@ -12,7 +12,7 @@ LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID')
 TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 HISTORICAL_LOG_FILE = 'historical_log.csv'
-LAST_DATA_FILE = 'last_data.txt' # เพิ่มตัวแปรสำหรับชื่อไฟล์ last_data.txt
+LAST_DATA_FILE = 'last_data.txt'
 
 # --- ฟังก์ชันดึงข้อมูล ---
 def get_water_data():
@@ -27,16 +27,13 @@ def get_water_data():
         data = json.loads(match.group(1))
         station_data = data[0].get('itc_water', {}).get('C13', None)
         if station_data:
-            # ดึงเฉพาะ 'qmax' ซึ่งเป็นค่าปล่อยน้ำ (ถ้ามี)
-            # ถ้าต้องการ 'storage' ด้วย ก็ใช้ f"{station_data.get('storage', '-')}/ {station_data.get('qmax', '-')} cms"
-            # แต่โจทย์ระบุ "การปล่อยน้ำ" จึงเน้นที่ qmax
-            return f"{station_data.get('qmax', '-')} cms" # เปลี่ยนให้ส่งค่า qmax เท่านั้น
+            return f"{station_data.get('qmax', '-')} cms"
         return None
     except Exception as e:
         print(f"Error in get_water_data: {e}")
         return None
 
-# --- ฟังก์ชันสำหรับข้อมูลย้อนหลัง (ฉบับแก้ไข) ---
+# --- ฟังก์ชันสำหรับข้อมูลย้อนหลัง ---
 def get_historical_data(target_date):
     """ค้นหาข้อมูลที่ใกล้เคียงกับวันเวลาของปีที่แล้วจากไฟล์ log"""
     if not os.path.exists(HISTORICAL_LOG_FILE):
@@ -54,15 +51,9 @@ def get_historical_data(target_date):
                 timestamp_str, value = line.strip().split(',', 1)
                 log_date = datetime.fromisoformat(timestamp_str)
                 
-                # --- ส่วนที่แก้ไข ---
-                # ตรวจสอบว่า log_date ที่อ่านมามี timezone หรือไม่
-                # .tzinfo is None คือไม่มี timezone (naive)
                 if log_date.tzinfo is None:
-                    # ถ้าไม่มี ให้กำหนด timezone ของไทยให้มัน
                     log_date = TIMEZONE_THAILAND.localize(log_date)
-                # --- จบส่วนแก้ไข ---
                 
-                # ตอนนี้ log_date เป็น aware และสามารถเปรียบเทียบได้แล้ว
                 if start_range <= log_date <= end_range:
                     diff = abs(target_date - log_date)
                     if diff < smallest_diff:
@@ -96,15 +87,13 @@ def send_line_message(message):
 
 # --- การทำงานหลัก ---
 def main():
-    # อ่านค่า last_data ก่อนดึงข้อมูลปัจจุบัน
     last_data = ''
-    if os.path.exists(LAST_DATA_FILE): # ใช้ LAST_DATA_FILE ที่เพิ่งกำหนด
+    if os.path.exists(LAST_DATA_FILE):
         with open(LAST_DATA_FILE, 'r', encoding='utf-8') as f:
             last_data = f.read().strip()
             
     current_data = get_water_data()
     
-    # ตรวจสอบว่าดึงข้อมูลปัจจุบันมาได้หรือไม่
     if current_data:
         print(f"Current data retrieved: {current_data}")
         
@@ -116,33 +105,33 @@ def main():
         historical_text = ""
         if historical_data:
             last_year_date_str = last_year_date.strftime("%d/%m/%Y")
-            # บรรทัดใหม่ (เอา ` ออก)
             historical_text = f"\n\nเทียบกับปีที่แล้ว ({last_year_date_str})\nค่าน้ำอยู่ที่: {historical_data}"
         else:
             print("Historical data not found for last year.")
         
         formatted_datetime = now_thailand.strftime("%d/%m/%Y %H:%M:%S")
-        
         sponsor_line = "พื้นที่ผู้สนับสนุน..."
         
-        # ปรับเปลี่ยนข้อความ LINE ให้ชัดเจนว่าเป็นการแจ้งเตือน "การปล่อยน้ำ"
-        # และรวมค่า last_data เข้าไป
-       message = (f"🌊 *แจ้งเตือนการปล่อยน้ำ เขื่อนเจ้าพระยา, ชัยนาท*\n"
-           f"━━━━━━━━━━\n"
-           f"✅ *ค่าปัจจุบัน*\n`{current_data}`\n\n"
-           f"⬅️ *ค่าเดิม (ก่อนหน้า)*\n`{last_data if last_data else 'ไม่พบข้อมูลเดิม'}`\n"
-           f"━━━━━━━━━━\n"
-           f"🗓️ {formatted_datetime}"
-           f"{historical_text}\n\n"
-           f"{sponsor_line}")
+        #
+        # --- โค้ดส่วนที่แก้ไข ---
+        # แก้ไขการย่อหน้าและนำ Backtick (`) ที่อาจก่อปัญหาออกไป
+        #
+        message = (
+            f"🌊 *แจ้งเตือนการปล่อยน้ำ เขื่อนเจ้าพระยา, ชัยนาท*\n"
+            f"━━━━━━━━━━\n"
+            f"✅ *ค่าปัจจุบัน:*\n{current_data}\n\n"
+            f"⬅️ *ค่าเดิม (ก่อนหน้า):*\n{last_data if last_data else 'ไม่พบข้อมูลเดิม'}\n"
+            f"━━━━━━━━━━\n"
+            f"🗓️ {formatted_datetime}"
+            f"{historical_text}\n\n"
+            f"{sponsor_line}"
+        )
 
         send_line_message(message)
         
-        # บันทึกข้อมูลปัจจุบันลงใน last_data.txt ทุกครั้งที่ส่งแจ้งเตือน
         with open(LAST_DATA_FILE, 'w', encoding='utf-8') as f:
             f.write(current_data)
         
-        # บันทึกข้อมูลลงใน historical_log.csv ทุกครั้งที่ส่งแจ้งเตือน
         append_to_historical_log(now_thailand, current_data)
         print("Appended new data to historical log and updated last_data.txt.")
         

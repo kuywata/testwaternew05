@@ -15,11 +15,10 @@ TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 HISTORICAL_LOG_FILE = 'historical_log.csv'
 LAST_DATA_FILE = 'last_data.txt'
 
-# --- ฟังก์ชันดึงข้อมูล (เวอร์ชันแก้ไข 최종) ---
+# --- ฟังก์ชันดึงข้อมูล (เวอร์ชันแก้ไขสมบูรณ์) ---
 def get_water_data():
     """
-    ดึงข้อมูล "ปริมาณน้ำ" โดยใช้ Regular Expression ค้นหาใน HTML ทั้งหมด
-    เพื่อความแม่นยำและทนทานต่อการเปลี่ยนแปลงสูงสุด
+    ดึงข้อมูล "ปริมาณน้ำ" โดยใช้วิธีค้นหา tag ที่มีความสัมพันธ์กันซึ่งมีความเสถียรสูงสุด
     """
     try:
         timestamp = int(time.time())
@@ -27,15 +26,20 @@ def get_water_data():
         response = requests.get(url_with_cache_bust, timeout=15)
         response.raise_for_status()
         
-        # ใช้วิธีค้นหาจาก pattern ของข้อความโดยตรง ซึ่งแม่นยำที่สุด
-        # Pattern คือ: หา "ปริมาณน้ำ", ตามด้วย HTML tag, และดึงกลุ่มตัวเลขแรกสุดออกมา
-        match = re.search(r'ปริมาณน้ำ\s*<\/td>\s*<td[^>]*>([0-9.]+)', response.text)
+        soup = BeautifulSoup(response.text, 'html.parser')
         
-        if match:
-            water_value = match.group(1)
-            return f"{water_value} cms"
+        # ใช้วิธีค้นหา tag ที่มีคำว่า 'ปริมาณน้ำ' แล้วหา tag td ถัดไป
+        header_tag = soup.find(lambda tag: tag.name == 'td' and 'ปริมาณน้ำ' in tag.get_text())
+        
+        if header_tag:
+            value_tag = header_tag.find_next_sibling('td')
+            if value_tag:
+                raw_text = value_tag.get_text(strip=True)
+                water_value = raw_text.split('/')[0].strip()
+                if water_value:
+                    return f"{water_value} cms"
                     
-        print("Could not find the water data value using Regex.")
+        print("Could not find the water data value using the final robust method.")
         return None
 
     except Exception as e:

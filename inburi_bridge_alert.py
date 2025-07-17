@@ -41,12 +41,12 @@ def send_line_message(message: str):
 
 def setup_driver():
     chrome_options = Options()
-    chrome_options.binary_location = os.getenv("CHROME_BIN", "/usr/bin/google-chrome-stable")
+    chrome_options.binary_location = "/usr/bin/google-chrome"
     chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
 
-    service = Service(executable_path=os.getenv("CHROMEDRIVER_PATH", "/usr/bin/chromedriver"))
+    service = Service(executable_path="/usr/bin/chromedriver")
     return webdriver.Chrome(service=service, options=chrome_options)
 
 

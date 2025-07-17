@@ -15,10 +15,11 @@ TIMEZONE_THAILAND = pytz.timezone('Asia/Bangkok')
 HISTORICAL_LOG_FILE = 'historical_log.csv'
 LAST_DATA_FILE = 'last_data.txt'
 
-# --- ฟังก์ชันดึงข้อมูล (เขียนใหม่) ---
+# --- ฟังก์ชันดึงข้อมูล (ปรับปรุงให้ยืดหยุ่นขึ้น) ---
 def get_water_data():
     """
-    ดึงข้อมูล "ปริมาณน้ำ" จากตารางบนหน้าเว็บโดยตรง
+    ดึงข้อมูล "ปริมาณน้ำ" จากตารางบนหน้าเว็บ
+    โดยใช้วิธีค้นหาจากข้อความ "ปริมาณน้ำ" ที่มีความเสถียรสูง
     """
     try:
         timestamp = int(time.time())
@@ -28,18 +29,20 @@ def get_water_data():
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # --- โค้ดที่ปรับปรุง ---
-        # ค้นหา <td> ที่มี class='text_bold' และ colspan='2' ซึ่งเป็นช่องที่เก็บข้อมูลโดยตรง
-        value_td = soup.find('td', class_='text_bold', colspan='2')
+        # 1. ค้นหา <td> ที่มีข้อความว่า "ปริมาณน้ำ"
+        header_td = soup.find('td', string='ปริมาณน้ำ')
         
-        if value_td:
-            # ดึงข้อความและตัดส่วนที่ไม่ต้องการ (เช่น " /") ออก
-            raw_text = value_td.get_text(strip=True)
-            water_value = raw_text.split('/')[0].strip()
-            if water_value:
-                return f"{water_value} cms"
+        if header_td:
+            # 2. ค้นหา <td> ที่อยู่ถัดไป ซึ่งเป็นที่เก็บค่าปริมาณน้ำ
+            value_td = header_td.find_next_sibling('td')
+            if value_td:
+                # 3. ดึงข้อความและตัดส่วนที่ไม่ต้องการออก
+                raw_text = value_td.get_text(strip=True)
+                water_value = raw_text.split('/')[0].strip()
+                if water_value:
+                    return f"{water_value} cms"
                     
-        print("Could not find the water data value in the HTML table.")
+        print("Could not find the water data value in the HTML table using the flexible method.")
         return None
 
     except Exception as e:
@@ -48,7 +51,6 @@ def get_water_data():
 
 # --- ฟังก์ชันสำหรับข้อมูลย้อนหลัง (คงเดิม) ---
 def get_historical_data(target_date):
-    """ค้นหาข้อมูลที่ใกล้เคียงกับวันเวลาของปีที่แล้วจากไฟล์ log"""
     if not os.path.exists(HISTORICAL_LOG_FILE):
         return None
     
@@ -76,13 +78,11 @@ def get_historical_data(target_date):
     return closest_entry
 
 def append_to_historical_log(now, data):
-    """บันทึกข้อมูลปัจจุบันลงในไฟล์ log"""
     with open(HISTORICAL_LOG_FILE, 'a', encoding='utf-8') as f:
         f.write(f"{now.isoformat()},{data}\n")
 
 # --- ฟังก์ชันส่ง LINE (คงเดิม) ---
 def send_line_message(message):
-    """ส่งข้อความไปยัง LINE"""
     if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_TARGET_ID:
         print("Missing LINE credentials.")
         return

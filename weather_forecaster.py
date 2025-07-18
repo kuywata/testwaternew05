@@ -1,4 +1,3 @@
-# weather_forecaster.py (corrected)
 import requests
 import os
 import time
@@ -11,9 +10,10 @@ LINE_CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_TARGET_ID           = os.getenv('LINE_TARGET_ID')
 OPENWEATHER_API_KEY      = os.getenv('OPENWEATHER_API_KEY')
 
-# Coordinates for In Buri, Singburi
+# Coordinates and name for In Buri, Singburi
 LATITUDE = 15.02
 LONGITUDE = 100.34
+LOCATION_NAME = 'อินทร์บุรี จ.สิงห์บุรี'
 
 # Thresholds
 RAIN_CONF_THRESHOLD = 0.3    # Probability of precipitation ≥30%
@@ -43,18 +43,45 @@ def write_state(path, state):
 
 def format_message(event, data):
     tz = pytz.timezone('Asia/Bangkok')
-    timestamp = datetime.utcnow().replace(tzinfo=pytz.UTC).astimezone(tz).strftime('%Y-%m-%d %H:%M')
+    # Current time for header
+    now = datetime.utcnow().replace(tzinfo=pytz.UTC).astimezone(tz)
+    timestamp = now.strftime('%Y-%m-%d %H:%M')
+    header = f"⚡️ แจ้งเตือนสภาพอากาศ ({LOCATION_NAME}) ⚡️"
+
     if event == 'RAIN_NOW':
-        return f"⛈️ [{timestamp}] ฝนกำลังตกตอนนี้"
+        lines = [
+            header,
+            f"⛈️ ฝนกำลังตกตอนนี้",
+            f"🕒 เมื่อ: {timestamp} น.",
+        ]
+        return "\n".join(lines)
+
     if event == 'FORECAST_RAIN':
-        hour = datetime.fromtimestamp(data['dt'], tz=pytz.UTC).astimezone(tz).hour
+        dt = datetime.fromtimestamp(data['dt'], tz=pytz.UTC).astimezone(tz)
+        hour = dt.strftime('%H:%M')
         vol  = data['value']
-        return f"🌧️ [{timestamp}] ฝนหนักคาดการณ์เวลา {hour}:00 (ปริมาณ {vol:.1f} มม.)"
+        lines = [
+            header,
+            f"🌧️ พยากรณ์ฝนตกหนัก",
+            f"🕒 เวลา: {hour} น.",
+            f"💧 ปริมาณ: {vol:.1f} มม.",
+        ]
+        return "\n".join(lines)
+
     if event == 'HEAT_WAVE':
-        hour = datetime.fromtimestamp(data['dt'], tz=pytz.UTC).astimezone(tz).hour
+        dt = datetime.fromtimestamp(data['dt'], tz=pytz.UTC).astimezone(tz)
+        hour = dt.strftime('%H:%M')
         tmp  = data['value']
-        return f"🔥 [{timestamp}] อากาศร้อนจัดเวลา {hour}:00 (สูงสุด {tmp:.1f}°C)"
-    return f"[{timestamp}] Unhandled event: {event}"
+        lines = [
+            header,
+            f"🔥 อากาศร้อนจัด",
+            f"🕒 เวลา: {hour} น.",
+            f"🌡️ สูงสุด: {tmp:.1f}°C",
+        ]
+        return "\n".join(lines)
+
+    # Fallback for other events
+    return f"{header}\n[{timestamp}] เหตุการณ์: {event}" 
 
 
 def send_line(msg):
@@ -110,7 +137,7 @@ def get_weather_event():
         rain_vol = entry.get('rain', {}).get('3h', 0)
         temp_max = entry.get('main', {}).get('temp_max', 0)
         epoch_dt = int(forecast_time.timestamp())
-        wid_str  = str(entry['weather'][0]['id'])  # Convert int to str to check prefix
+        wid_str  = str(entry['weather'][0]['id'])
         if wid_str.startswith(('5', '2')) and pop >= RAIN_CONF_THRESHOLD and rain_vol >= MIN_RAIN_MM:
             return 'FORECAST_RAIN', {'dt': epoch_dt, 'value': rain_vol}
         if temp_max >= HEAT_THRESHOLD:

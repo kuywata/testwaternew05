@@ -4,7 +4,7 @@ import json
 import requests
 from bs4 import BeautifulSoup
 
-# Selenium imports for JS‐rendered table
+# Selenium imports
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -37,7 +37,7 @@ LINE_TARGET = os.getenv("LINE_TARGET_ID")
 def send_line_message(msg: str):
     """ส่งข้อความผ่าน LINE Messaging API"""
     if DRY_RUN:
-        print("[DRY‑RUN] send_line_message() ➔")
+        print("[DRY‑RUN] send_line_message would send:")
         print(msg)
         return
 
@@ -66,14 +66,14 @@ def fetch_rendered_html(url, timeout=15) -> str:
         with open(LOCAL_HTML, "r", encoding="utf-8") as f:
             return f.read()
 
-    chrome_opts = Options()
-    chrome_opts.add_argument("--headless")
-    chrome_opts.add_argument("--no-sandbox")
-    chrome_opts.add_argument("--disable-dev-shm-usage")
+    opts = Options()
+    opts.add_argument("--headless")
+    opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-dev-shm-usage")
 
     driver = webdriver.Chrome(
         service=Service(ChromeDriverManager().install()),
-        options=chrome_opts
+        options=opts
     )
     driver.get(url)
     try:
@@ -95,8 +95,7 @@ def get_water_data():
 
     soup = BeautifulSoup(html, "html.parser")
     for th in soup.select("th[scope='row']"):
-        txt = th.get_text(strip=True)
-        if "อินทร์บุรี" in txt:
+        if "อินทร์บุรี" in th.get_text(strip=True):
             tr   = th.find_parent("tr")
             cols = tr.find_all("td")
             water_level = float(cols[1].get_text(strip=True))
@@ -114,7 +113,6 @@ def get_water_data():
                 "below_bank":    below_bank,
                 "time":          report_time,
             }
-
     print("[ERROR] ไม่พบข้อมูลสถานี อินทร์บุรี ใน HTML")
     return None
 
@@ -164,7 +162,7 @@ def main():
     else:
         print("[INFO] ไม่มีการแจ้งเตือนในรอบนี้")
 
-    # บันทึกข้อมูลใหม่เสมอ ไม่ว่าจะ alert หรือไม่
+    # บันทึกข้อมูลใหม่เสมอ
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 

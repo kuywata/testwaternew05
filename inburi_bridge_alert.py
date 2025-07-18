@@ -14,16 +14,16 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-
+# --- Configurations ---
 DATA_FILE = "inburi_bridge_data.json"
 
-# อ่าน threshold
+# อ่าน threshold จาก env (หน่วยเป็นเมตร; default=0.1 ม.)
 _raw = os.getenv("NOTIFICATION_THRESHOLD_M", "")
 try:
-    NOTIFICATION_THRESHOLD = float(_raw) if _raw else 0.10
+    NOTIFICATION_THRESHOLD = float(_raw) if _raw else 0.1
 except ValueError:
-    print(f"--> ❗ WARN: NOTIFICATION_THRESHOLD_M='{_raw}' แปลงไม่สำเร็จ, ใช้ default=0.10")
-    NOTIFICATION_THRESHOLD = 0.10
+    print(f"--> ❗ WARN: NOTIFICATION_THRESHOLD_M='{_raw}' แปลงไม่สำเร็จ, ใช้ default=0.1")
+    NOTIFICATION_THRESHOLD = 0.1
 
 LINE_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_TARGET_ID    = os.getenv("LINE_TARGET_ID")
@@ -48,7 +48,7 @@ def send_line_message(message: str):
 
 
 def fetch_rendered_html(url: str, timeout: int = 15) -> str:
-    """ใช้ Selenium รัน headless Chrome รอให้ <th scope='row'> ปรากฏ แล้วคืน page_source"""
+    """ใช้ Selenium รัน headless Chrome และรอให้ตารางโหลดครบก่อนคืน page_source"""
     chrome_opts = Options()
     chrome_opts.add_argument("--headless")
     chrome_opts.add_argument("--disable-gpu")
@@ -77,11 +77,9 @@ def get_water_data():
     soup = BeautifulSoup(html, "html.parser")
 
     for th in soup.find_all("th", {"scope": "row"}):
-        text = th.get_text(strip=True)
-        if "อินทร์บุรี" in text:
+        if "อินทร์บุรี" in th.get_text(strip=True):
             row = th.find_parent("tr")
             cols = row.find_all("td")
-            # ตำบล/อำเภอ = cols[0], water=cols[1], bank=cols[2], status span, below calc, time=cols[6]
             water_level = float(cols[1].get_text(strip=True))
             bank_level  = float(cols[2].get_text(strip=True))
             status      = row.find("span", class_="badge").get_text(strip=True)
@@ -102,6 +100,8 @@ def get_water_data():
 
 def main():
     print("--- เริ่มทำงาน inburi_bridge_alert.py ---")
+
+    # โหลดข้อมูลเก่า (ถ้ามี)
     last_data = {}
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
@@ -113,21 +113,42 @@ def main():
         print("--> ไม่มีข้อมูลใหม่, จบการทำงาน")
         return
 
-    if last_data.get("water_level") != data["water_level"]:
+    prev = last_data.get("water_level")
+    if prev is None:
+        # ครั้งแรก: บันทึกแต่ไม่แจ้ง
+        print("--> ยังไม่มีข้อมูลเก่า, บันทึกและไม่แจ้งครั้งแรก")
+        to_notify = False
+        diff = 0
+        direction = ""
+    else:
+        diff = data["water_level"] - prev
+        if abs(diff) >= NOTIFICATION_THRESHOLD:
+            direction = "⬆️" if diff > 0 else "⬇️"
+            print(f"--> เปลี่ยนแปลง {direction}{abs(diff):.2f} ม. (เกิน {NOTIFICATION_THRESHOLD} ม.)")
+            to_notify = True
+        else:
+            print(f"--> การเปลี่ยนแปลง {diff:.2f} ม. น้อยกว่า {NOTIFICATION_THRESHOLD} ม., ไม่แจ้ง")
+            to_notify = False
+
+    if to_notify:
+        # ข้อความสวยงามบนมือถือ
         msg = (
-            f"🌊 สถานี {data['station_name']}:\n"
-            f"• ระดับน้ำ: {data['water_level']} ม.\n"
-            f"• ระดับตลิ่ง: {data['bank_level']} ม.\n"
-            f"• สถานะ: {data['status']}\n"
-            f"• ห่างจากตลิ่ง: {data['below_bank']} ม.\n"
-            f"🕒 รายงานเวลา: {data['time']}"
+            f"📢 แจ้งเตือนระดับน้ำ {direction}{abs(diff):.2f} ม.\n"
+            "════════════════════\n"
+            f"🌊 ระดับน้ำ     : {data['water_level']} ม.\n"
+            f"🏞️ ระดับตลิ่ง    : {data['bank_level']} ม.\n"
+            f"🚦 สถานะ       : {data['status']}\n"
+            f"📐 ห่างจากตลิ่ง : {data['below_bank']} ม.\n"
+            "───────────────\n"
+            f"🕒 เวลา        : {data['time']}"
         )
-        print(msg)
         send_line_message(msg)
+        # บันทึกข้อมูลใหม่ทับของเก่า
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     else:
-        print("--> ระดับน้ำไม่เปลี่ยน แสดงว่าไม่ต้องแจ้งเตือน")
+        print("--> ไม่ต้องแจ้งเตือนครั้งนี้")
+
     print("--- จบ script ---")
 
 

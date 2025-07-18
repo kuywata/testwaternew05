@@ -1,11 +1,11 @@
 {
     "last_alert_times": {
-        "HEAT_WAVE": 1752810747.5480816
+        "HEAT_WAVE": 1752822024.7492611
     },
     "last_alerted_forecasts": {
         "HEAT_WAVE": {
-            "dt": 1752818400,
-            "value": 36.79
+            "dt": 1752829200,
+            "value": 36
         }
     }
 }

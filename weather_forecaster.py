@@ -10,9 +10,9 @@ LINE_CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_TARGET_ID           = os.getenv('LINE_TARGET_ID')
 OPENWEATHER_API_KEY      = os.getenv('OPENWEATHER_API_KEY')
 
-# Coordinates and name for In Buri, Singburi
-LATITUDE = 15.02
-LONGITUDE = 100.34
+# Coordinates and display name for location
+LATITUDE      = 15.02
+LONGITUDE     = 100.34
 LOCATION_NAME = 'อินทร์บุรี จ.สิงห์บุรี'
 
 # Thresholds
@@ -20,8 +20,8 @@ RAIN_CONF_THRESHOLD = 0.3    # Probability of precipitation ≥30%
 MIN_RAIN_MM         = 5.0    # Rain volume ≥5 mm in 3h
 HEAT_THRESHOLD      = 35.0   # Max temperature ≥35°C
 
-FORECAST_HOURS = 12          # Look ahead this many hours
-COOLDOWN_HOURS = 6           # Cooldown period for alerts (hours)
+FORECAST_HOURS = 12         # Look ahead this many hours
+COOLDOWN_HOURS = 6          # Cooldown for alerts (hours)
 STATE_FILE     = 'state.json'
 
 
@@ -30,10 +30,7 @@ def read_state(path):
         with open(path, 'r') as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {
-            'last_alert_times': {},
-            'last_alerted_forecasts': {}
-        }
+        return {'last_alert_times': {}, 'last_alerted_forecasts': {}}
 
 
 def write_state(path, state):
@@ -43,7 +40,6 @@ def write_state(path, state):
 
 def format_message(event, data):
     tz = pytz.timezone('Asia/Bangkok')
-    # Current time for header
     now = datetime.utcnow().replace(tzinfo=pytz.UTC).astimezone(tz)
     timestamp = now.strftime('%Y-%m-%d %H:%M')
     header = f"⚡️ แจ้งเตือนสภาพอากาศ ({LOCATION_NAME}) ⚡️"
@@ -51,37 +47,37 @@ def format_message(event, data):
     if event == 'RAIN_NOW':
         lines = [
             header,
-            f"⛈️ ฝนกำลังตกตอนนี้",
-            f"🕒 เมื่อ: {timestamp} น.",
+            "⛈️ ฝนกำลังตกตอนนี้",
+            f"🕒 เวลา: {timestamp} น.",
         ]
         return "\n".join(lines)
 
     if event == 'FORECAST_RAIN':
         dt = datetime.fromtimestamp(data['dt'], tz=pytz.UTC).astimezone(tz)
-        hour = dt.strftime('%H:%M')
-        vol  = data['value']
+        time_str = dt.strftime('%H:%M')
+        volume = data['value']
         lines = [
             header,
-            f"🌧️ พยากรณ์ฝนตกหนัก",
-            f"🕒 เวลา: {hour} น.",
-            f"💧 ปริมาณ: {vol:.1f} มม.",
+            "🌧️ คาดว่าจะมีฝนตก",
+            f"🕒 เวลา: {time_str} น.",
+            f"💧 ปริมาณ: {volume:.1f} มม.",
         ]
         return "\n".join(lines)
 
     if event == 'HEAT_WAVE':
         dt = datetime.fromtimestamp(data['dt'], tz=pytz.UTC).astimezone(tz)
-        hour = dt.strftime('%H:%M')
-        tmp  = data['value']
+        time_str = dt.strftime('%H:%M')
+        temp = data['value']
         lines = [
             header,
-            f"🔥 อากาศร้อนจัด",
-            f"🕒 เวลา: {hour} น.",
-            f"🌡️ สูงสุด: {tmp:.1f}°C",
+            "🔥 อากาศร้อนจัด",
+            f"🕒 เวลา: {time_str} น.",
+            f"🌡️ สูงสุด: {temp:.1f}°C",
         ]
         return "\n".join(lines)
 
-    # Fallback for other events
-    return f"{header}\n[{timestamp}] เหตุการณ์: {event}" 
+    # Fallback
+    return f"{header}\n🕒 เวลา: {timestamp} น.\n❗️ เหตุการณ์: {event}"
 
 
 def send_line(msg):
@@ -104,7 +100,8 @@ def get_current_weather_event():
     if not OPENWEATHER_API_KEY:
         print("Error: OPENWEATHER_API_KEY not set. Skipping current weather check.")
         return None, None
-    url = f"https://api.openweathermap.org/data/2.5/weather?lat={LATITUDE}&lon={LONGITUDE}&appid={OPENWEATHER_API_KEY}&units=metric"
+    url = (f"https://api.openweathermap.org/data/2.5/weather?lat={LATITUDE}&lon={LONGITUDE}"
+           f"&appid={OPENWEATHER_API_KEY}&units=metric")
     try:
         resp = requests.get(url, timeout=10); resp.raise_for_status()
         data = resp.json()
@@ -120,7 +117,8 @@ def get_weather_event():
     if not OPENWEATHER_API_KEY:
         print("Error: OPENWEATHER_API_KEY not set. Skipping forecast check.")
         return None, None
-    url = f"https://api.openweathermap.org/data/2.5/forecast?lat={LATITUDE}&lon={LONGITUDE}&appid={OPENWEATHER_API_KEY}&units=metric"
+    url = (f"https://api.openweathermap.org/data/2.5/forecast?lat={LATITUDE}&lon={LONGITUDE}"
+           f"&appid={OPENWEATHER_API_KEY}&units=metric")
     try:
         resp = requests.get(url, timeout=10); resp.raise_for_status()
         data = resp.json()
@@ -147,41 +145,37 @@ def get_weather_event():
 
 def main():
     state = read_state(STATE_FILE)
-    last_alert_times        = state.get('last_alert_times', {})
-    last_alerted_forecasts  = state.get('last_alerted_forecasts', {})
+    last_alert_times       = state.get('last_alert_times', {})
+    last_alerted_forecasts = state.get('last_alerted_forecasts', {})
 
-    # 1) Check current rain
+    # 1) Current weather
     event_now, data_now = get_current_weather_event()
     if event_now == 'RAIN_NOW':
-        now     = time.time()
+        now_ts = time.time()
         last_ts = last_alert_times.get(event_now, 0)
-        if now - last_ts >= COOLDOWN_HOURS * 3600:
+        if now_ts - last_ts >= COOLDOWN_HOURS * 3600:
             if send_line(format_message(event_now, data_now)):
-                state['last_alert_times'][event_now] = now
+                state['last_alert_times'][event_now] = now_ts
                 write_state(STATE_FILE, state)
         return
 
-    # 2) Check forecast events
+    # 2) Forecast
     event_fc, data_fc = get_weather_event()
     if not event_fc:
-        print("No significant weather events found within the next period.")
+        print("No significant weather events within next period.")
         return
-    now        = time.time()
+    now_ts     = time.time()
     last_ts    = last_alert_times.get(event_fc, 0)
-    forecast_dt= data_fc['dt']
-    forecast_val = data_fc['value']
+    fc_dt      = data_fc['dt']
     prev       = last_alerted_forecasts.get(event_fc, {})
-
-    # Bypass cooldown if new forecast time
-    bypass = forecast_dt > prev.get('dt', 0)
-    if not bypass and now - last_ts < COOLDOWN_HOURS*3600:
+    bypass     = fc_dt > prev.get('dt', 0)
+    if not bypass and now_ts - last_ts < COOLDOWN_HOURS * 3600:
         print("Within cooldown. Skipping alert.")
         return
 
-    # Send forecast alert
     if send_line(format_message(event_fc, data_fc)):
-        state['last_alert_times'][event_fc]       = now
-        state['last_alerted_forecasts'][event_fc] = {'dt': forecast_dt, 'value': forecast_val}
+        state['last_alert_times'][event_fc]        = now_ts
+        state['last_alerted_forecasts'][event_fc] = {'dt': fc_dt, 'value': data_fc['value']}
         write_state(STATE_FILE, state)
 
 if __name__ == '__main__':

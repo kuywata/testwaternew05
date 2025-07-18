@@ -17,12 +17,12 @@ jobs:
       LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
       LINE_TARGET_ID:            ${{ secrets.LINE_TARGET_ID }}
       NOTIFICATION_THRESHOLD_M:  ${{ secrets.NOTIFICATION_THRESHOLD_M }}
-      DRY_RUN:                   ${{ secrets.DRY_RUN  || 'false' }}
-      USE_LOCAL_HTML:            ${{ secrets.USE_LOCAL_HTML  || 'false' }}
-      LOCAL_HTML_PATH:           ${{ secrets.LOCAL_HTML_PATH || 'page.html' }}
+      DRY_RUN:                   ${{ secrets.DRY_RUN }}
+      USE_LOCAL_HTML:            ${{ secrets.USE_LOCAL_HTML }}
+      LOCAL_HTML_PATH:           ${{ secrets.LOCAL_HTML_PATH }}
 
     steps:
-      - name: Checkout code (with full history)
+      - name: Checkout code (full history)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0

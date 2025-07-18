@@ -1,11 +1,10 @@
-# inburi_bridge_alert.py
+#!/usr/bin/env python3
 import os
 import json
-import time
 import requests
 from bs4 import BeautifulSoup
 
-# Selenium imports
+# Selenium imports for JS‐rendered table
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -14,44 +13,61 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# --- Configurations ---
-DATA_FILE = "inburi_bridge_data.json"
+# -------- Configurations & Flags --------
+DATA_FILE         = "inburi_bridge_data.json"
+DEFAULT_THRESHOLD = 0.1  # ม. (10 ซม.)
 
-# อ่าน threshold จาก env (หน่วยเป็นเมตร; default=0.1 ม.)
+# ENV‑flags
+DRY_RUN        = os.getenv("DRY_RUN", "").lower() in ("1", "true")
+USE_LOCAL_HTML = os.getenv("USE_LOCAL_HTML", "").lower() in ("1", "true")
+LOCAL_HTML     = os.getenv("LOCAL_HTML_PATH", "page.html")
+
+# Read threshold from env (meters)
 _raw = os.getenv("NOTIFICATION_THRESHOLD_M", "")
 try:
-    NOTIFICATION_THRESHOLD = float(_raw) if _raw else 0.1
+    NOTIFICATION_THRESHOLD = float(_raw) if _raw else DEFAULT_THRESHOLD
 except ValueError:
-    print(f"--> ❗ WARN: NOTIFICATION_THRESHOLD_M='{_raw}' แปลงไม่สำเร็จ, ใช้ default=0.1")
-    NOTIFICATION_THRESHOLD = 0.1
+    print(f"[WARN] แปลง NOTIFICATION_THRESHOLD_M='{_raw}' ไม่สำเร็จ → ใช้ default={DEFAULT_THRESHOLD}")
+    NOTIFICATION_THRESHOLD = DEFAULT_THRESHOLD
 
-LINE_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
-LINE_TARGET_ID    = os.getenv("LINE_TARGET_ID")
+LINE_TOKEN  = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+LINE_TARGET = os.getenv("LINE_TARGET_ID")
 
 
-def send_line_message(message: str):
-    if not (LINE_ACCESS_TOKEN and LINE_TARGET_ID):
-        print("--> ❌ LINE token/target ไม่ถูกตั้งค่า!")
+def send_line_message(msg: str):
+    """ส่งข้อความผ่าน LINE Messaging API"""
+    if DRY_RUN:
+        print("[DRY‑RUN] send_line_message() ➔")
+        print(msg)
         return
+
+    if not (LINE_TOKEN and LINE_TARGET):
+        print("[ERROR] LINE_TOKEN/LINE_TARGET ไม่ครบ!")
+        return
+
     url = "https://api.line.me/v2/bot/message/push"
     headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {LINE_ACCESS_TOKEN}"
+        "Authorization": f"Bearer {LINE_TOKEN}",
+        "Content-Type":  "application/json"
     }
     payload = {
-        "to": LINE_TARGET_ID,
-        "messages": [{"type": "text", "text": message}]
+        "to": LINE_TARGET,
+        "messages": [{"type": "text", "text": msg}]
     }
     resp = requests.post(url, headers=headers, json=payload, timeout=10)
     if resp.status_code != 200:
-        print(f"--> ❌ ส่ง LINE ไม่สำเร็จ: {resp.status_code} {resp.text}")
+        print(f"[ERROR] ส่ง LINE ล้มเหลว: {resp.status_code} {resp.text}")
 
 
-def fetch_rendered_html(url: str, timeout: int = 15) -> str:
-    """ใช้ Selenium รัน headless Chrome และรอให้ตารางโหลดครบก่อนคืน page_source"""
+def fetch_rendered_html(url, timeout=15) -> str:
+    """โหลดหน้าเว็บด้วย Selenium หรือจากไฟล์ local (mock)"""
+    if USE_LOCAL_HTML:
+        print(f"[INFO] USE_LOCAL_HTML=TRUE, อ่านจากไฟล์ {LOCAL_HTML}")
+        with open(LOCAL_HTML, "r", encoding="utf-8") as f:
+            return f.read()
+
     chrome_opts = Options()
     chrome_opts.add_argument("--headless")
-    chrome_opts.add_argument("--disable-gpu")
     chrome_opts.add_argument("--no-sandbox")
     chrome_opts.add_argument("--disable-dev-shm-usage")
 
@@ -65,26 +81,31 @@ def fetch_rendered_html(url: str, timeout: int = 15) -> str:
             EC.presence_of_element_located((By.CSS_SELECTOR, "th[scope='row']"))
         )
     except Exception:
-        print("--> ⚠️ Selenium: รอ element แล้ว timeout")
+        print("[WARN] Selenium timeout รอ table JS")
     html = driver.page_source
     driver.quit()
     return html
 
 
 def get_water_data():
-    url = "https://singburi.thaiwater.net/wl"
-    html = fetch_rendered_html(url)
-    soup = BeautifulSoup(html, "html.parser")
+    """Parse ข้อมูลสถานี อินทร์บุรี จาก HTML"""
+    print("[DEBUG] ดึง HTML จากเว็บ...")
+    html = fetch_rendered_html("https://singburi.thaiwater.net/wl")
+    print(f"[DEBUG] HTML length = {len(html)} chars")
 
-    for th in soup.find_all("th", {"scope": "row"}):
-        if "อินทร์บุรี" in th.get_text(strip=True):
-            row = th.find_parent("tr")
-            cols = row.find_all("td")
+    soup = BeautifulSoup(html, "html.parser")
+    for th in soup.select("th[scope='row']"):
+        txt = th.get_text(strip=True)
+        if "อินทร์บุรี" in txt:
+            tr   = th.find_parent("tr")
+            cols = tr.find_all("td")
             water_level = float(cols[1].get_text(strip=True))
             bank_level  = float(cols[2].get_text(strip=True))
-            status      = row.find("span", class_="badge").get_text(strip=True)
+            status      = tr.select_one("span.badge").get_text(strip=True)
             below_bank  = round(bank_level - water_level, 2)
             report_time = cols[6].get_text(strip=True)
+
+            print(f"[DEBUG] Parsed water={water_level}, bank={bank_level}, status={status}, below={below_bank}, time={report_time}")
             return {
                 "station_name": "อินทร์บุรี",
                 "water_level":   water_level,
@@ -94,62 +115,60 @@ def get_water_data():
                 "time":          report_time,
             }
 
-    print("--> ไม่เจอข้อมูลสถานี อินทร์บุรี")
+    print("[ERROR] ไม่พบข้อมูลสถานี อินทร์บุรี ใน HTML")
     return None
 
 
 def main():
-    print("--- เริ่มทำงาน inburi_bridge_alert.py ---")
-
-    # โหลดข้อมูลเก่า (ถ้ามี)
+    print("=== เริ่ม inburi_bridge_alert ===")
+    # โหลดข้อมูลเก่า
     last_data = {}
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             last_data = json.load(f)
-        print("โหลดข้อมูลเก่า:", last_data)
+        print(f"[DEBUG] last_data = {last_data}")
 
     data = get_water_data()
     if not data:
-        print("--> ไม่มีข้อมูลใหม่, จบการทำงาน")
         return
 
     prev = last_data.get("water_level")
     if prev is None:
-        # ครั้งแรก: บันทึกแต่ไม่แจ้ง
-        print("--> ยังไม่มีข้อมูลเก่า, บันทึกและไม่แจ้งครั้งแรก")
-        to_notify = False
-        diff = 0
-        direction = ""
+        print("[INFO] ไม่มีข้อมูลเก่า, บันทึกแต่ไม่แจ้งครั้งแรก")
+        need_alert = False
+        diff       = 0.0
+        direction  = ""
     else:
         diff = data["water_level"] - prev
+        print(f"[DEBUG] diff = {diff:.2f} (threshold={NOTIFICATION_THRESHOLD})")
         if abs(diff) >= NOTIFICATION_THRESHOLD:
             direction = "⬆️" if diff > 0 else "⬇️"
-            print(f"--> เปลี่ยนแปลง {direction}{abs(diff):.2f} ม. (เกิน {NOTIFICATION_THRESHOLD} ม.)")
-            to_notify = True
+            need_alert = True
         else:
-            print(f"--> การเปลี่ยนแปลง {diff:.2f} ม. น้อยกว่า {NOTIFICATION_THRESHOLD} ม., ไม่แจ้ง")
-            to_notify = False
+            print("[INFO] diff น้อยกว่า threshold, ไม่แจ้ง")
+            need_alert = False
 
-    if to_notify:
-        # ข้อความสวยงามบนมือถือ
+    # สร้างข้อความและส่ง (หรือ dry‑run)
+    if need_alert:
         msg = (
-            f"📢 แจ้งเตือนระดับน้ำสะพานอินทร์บุรี {direction}{abs(diff):.2f} ม.\n"
-            "══════════\n"
+            f"📢 แจ้งระดับน้ำ {direction}{abs(diff):.2f} ม. (อินทร์บุรี)\n"
+            "══════════════════\n"
             f"🌊 ระดับน้ำ     : {data['water_level']} ม.\n"
             f"🏞️ ระดับตลิ่ง    : {data['bank_level']} ม.\n"
             f"🚦 สถานะ       : {data['status']}\n"
             f"📐 ห่างจากตลิ่ง : {data['below_bank']} ม.\n"
-            "────────\n"
+            "───────────────\n"
             f"🕒 เวลา        : {data['time']}"
         )
         send_line_message(msg)
-        # บันทึกข้อมูลใหม่ทับของเก่า
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
     else:
-        print("--> ไม่ต้องแจ้งเตือนครั้งนี้")
+        print("[INFO] ไม่มีการแจ้งเตือนในรอบนี้")
 
-    print("--- จบ script ---")
+    # บันทึกข้อมูลใหม่เสมอ ไม่ว่าจะ alert หรือไม่
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    print("=== จบ inburi_bridge_alert ===")
 
 
 if __name__ == "__main__":

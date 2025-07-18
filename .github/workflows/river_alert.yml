@@ -4,7 +4,7 @@ on:
   schedule:
     # รันทุก 30 นาที (UTC)
     - cron: '*/30 * * * *'
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 jobs:
   alert:
@@ -43,7 +43,7 @@ jobs:
       - name: Commit updated state file
         uses: EndBug/add-and-commit@v9
         with:
-          author_name: github-actions[bot]
-          author_email: github-actions[bot]@users.noreply.github.com
-          message: chore: update inburi_bridge_data.json
-          add: inburi_bridge_data.json
+          author_name: "github-actions[bot]"
+          author_email: "github-actions[bot]@users.noreply.github.com"
+          message: "chore: update inburi_bridge_data.json"
+          add: "inburi_bridge_data.json"

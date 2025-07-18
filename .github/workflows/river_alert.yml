@@ -2,7 +2,7 @@ name: Inburi Bridge Alert
 
 on:
   schedule:
-    # รันทุก 15 นาที (UTC)
+    # รันทุก 30 นาที (UTC)
     - cron: '*/30 * * * *'
   workflow_dispatch:
 
@@ -10,17 +10,22 @@ jobs:
   alert:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: write   # อนุญาตให้ commit กลับได้
+
     env:
       LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
       LINE_TARGET_ID:            ${{ secrets.LINE_TARGET_ID }}
       NOTIFICATION_THRESHOLD_M:  ${{ secrets.NOTIFICATION_THRESHOLD_M }}
-      # แก้จาก filter | default(...) เป็น OR expression ของ GitHub Actions
-      DRY_RUN:        ${{ secrets.DRY_RUN  || 'false' }}
-      USE_LOCAL_HTML: ${{ secrets.USE_LOCAL_HTML  || 'false' }}
-      LOCAL_HTML_PATH: ${{ secrets.LOCAL_HTML_PATH || 'page.html' }}
+      DRY_RUN:                   ${{ secrets.DRY_RUN  || 'false' }}
+      USE_LOCAL_HTML:            ${{ secrets.USE_LOCAL_HTML  || 'false' }}
+      LOCAL_HTML_PATH:           ${{ secrets.LOCAL_HTML_PATH || 'page.html' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code (with full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.10
         uses: actions/setup-python@v5
@@ -34,3 +39,11 @@ jobs:
 
       - name: Run alert script
         run: python inburi_bridge_alert.py
+
+      - name: Commit updated state file
+        uses: EndBug/add-and-commit@v9
+        with:
+          author_name: github-actions[bot]
+          author_email: github-actions[bot]@users.noreply.github.com
+          message: chore: update inburi_bridge_data.json
+          add: inburi_bridge_data.json

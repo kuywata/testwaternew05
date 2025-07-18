@@ -4,7 +4,6 @@ import json
 import requests
 from bs4 import BeautifulSoup
 
-# Selenium imports
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -13,11 +12,11 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# -------- Configurations & Flags --------
+# -------- CONFIGURATION --------
 DATA_FILE         = "inburi_bridge_data.json"
-DEFAULT_THRESHOLD = 0.1  # ม. (10 ซม.)
+DEFAULT_THRESHOLD = 0.1   # เมตร (10 ซม.)
 
-# ENV‑flags
+# ENV FLAGS
 DRY_RUN        = os.getenv("DRY_RUN", "").lower() in ("1", "true")
 USE_LOCAL_HTML = os.getenv("USE_LOCAL_HTML", "").lower() in ("1", "true")
 LOCAL_HTML     = os.getenv("LOCAL_HTML_PATH", "page.html")
@@ -27,7 +26,7 @@ _raw = os.getenv("NOTIFICATION_THRESHOLD_M", "")
 try:
     NOTIFICATION_THRESHOLD = float(_raw) if _raw else DEFAULT_THRESHOLD
 except ValueError:
-    print(f"[WARN] แปลง NOTIFICATION_THRESHOLD_M='{_raw}' ไม่สำเร็จ → ใช้ default={DEFAULT_THRESHOLD}")
+    print(f"[WARN] แปลง NOTIFICATION_THRESHOLD_M='{_raw}' ไม่สำเร็จ → ใช้ default={DEFAULT_THRESHOLD:.2f} m")
     NOTIFICATION_THRESHOLD = DEFAULT_THRESHOLD
 
 LINE_TOKEN  = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
@@ -35,7 +34,7 @@ LINE_TARGET = os.getenv("LINE_TARGET_ID")
 
 
 def send_line_message(msg: str):
-    """ส่งข้อความผ่าน LINE Messaging API"""
+    """ส่งข้อความผ่าน LINE (หรือ Dry‑run)"""
     if DRY_RUN:
         print("[DRY‑RUN] send_line_message would send:")
         print(msg)
@@ -59,10 +58,10 @@ def send_line_message(msg: str):
         print(f"[ERROR] ส่ง LINE ล้มเหลว: {resp.status_code} {resp.text}")
 
 
-def fetch_rendered_html(url, timeout=15) -> str:
-    """โหลดหน้าเว็บด้วย Selenium หรือจากไฟล์ local (mock)"""
+def fetch_rendered_html(url: str, timeout: int = 15) -> str:
+    """โหลดหน้าเว็บด้วย Selenium หรือจากไฟล์ mock"""
     if USE_LOCAL_HTML:
-        print(f"[INFO] USE_LOCAL_HTML=TRUE, อ่านจากไฟล์ {LOCAL_HTML}")
+        print(f"[INFO] USE_LOCAL_HTML=TRUE, อ่านจากไฟล์ '{LOCAL_HTML}'")
         with open(LOCAL_HTML, "r", encoding="utf-8") as f:
             return f.read()
 
@@ -81,14 +80,14 @@ def fetch_rendered_html(url, timeout=15) -> str:
             EC.presence_of_element_located((By.CSS_SELECTOR, "th[scope='row']"))
         )
     except Exception:
-        print("[WARN] Selenium timeout รอ table JS")
+        print("[WARN] Selenium timeout รอ table JS โหลด")
     html = driver.page_source
     driver.quit()
     return html
 
 
 def get_water_data():
-    """Parse ข้อมูลสถานี อินทร์บุรี จาก HTML"""
+    """Parse ข้อมูลสถานี 'อินทร์บุรี' จาก HTML"""
     print("[DEBUG] ดึง HTML จากเว็บ...")
     html = fetch_rendered_html("https://singburi.thaiwater.net/wl")
     print(f"[DEBUG] HTML length = {len(html)} chars")
@@ -103,7 +102,6 @@ def get_water_data():
             status      = tr.select_one("span.badge").get_text(strip=True)
             below_bank  = round(bank_level - water_level, 2)
             report_time = cols[6].get_text(strip=True)
-
             print(f"[DEBUG] Parsed water={water_level}, bank={bank_level}, status={status}, below={below_bank}, time={report_time}")
             return {
                 "station_name": "อินทร์บุรี",
@@ -119,7 +117,9 @@ def get_water_data():
 
 def main():
     print("=== เริ่ม inburi_bridge_alert ===")
-    # โหลดข้อมูลเก่า
+    print(f"[INFO] Using NOTIFICATION_THRESHOLD = {NOTIFICATION_THRESHOLD:.2f} m")
+
+    # โหลดข้อมูลเก่า (state)
     last_data = {}
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
@@ -138,7 +138,7 @@ def main():
         direction  = ""
     else:
         diff = data["water_level"] - prev
-        print(f"[DEBUG] diff = {diff:.2f} (threshold={NOTIFICATION_THRESHOLD})")
+        print(f"[DEBUG] prev={prev:.2f}, new={data['water_level']:.2f}, diff={diff:.2f}")
         if abs(diff) >= NOTIFICATION_THRESHOLD:
             direction = "⬆️" if diff > 0 else "⬇️"
             need_alert = True
@@ -146,7 +146,6 @@ def main():
             print("[INFO] diff น้อยกว่า threshold, ไม่แจ้ง")
             need_alert = False
 
-    # สร้างข้อความและส่ง (หรือ dry‑run)
     if need_alert:
         msg = (
             f"📢 แจ้งระดับน้ำ {direction}{abs(diff):.2f} ม. (อินทร์บุรี)\n"
@@ -162,7 +161,7 @@ def main():
     else:
         print("[INFO] ไม่มีการแจ้งเตือนในรอบนี้")
 
-    # บันทึกข้อมูลใหม่เสมอ
+    # บันทึก state เสมอ
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 

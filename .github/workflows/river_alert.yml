@@ -1,8 +1,10 @@
+# .github/workflows/river_alert.yml
 name: Inburi Bridge Alert
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # ทุก 30 นาที (ตัวอย่าง)
+    # รันทุก 15 นาที (UTC)
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -17,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'

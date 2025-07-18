@@ -3,7 +3,7 @@ name: Inburi Bridge Alert
 on:
   schedule:
     # รันทุก 15 นาที (UTC)
-    - cron: '*/15 * * * *'
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 jobs:

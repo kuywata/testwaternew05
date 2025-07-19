@@ -21,8 +21,10 @@ def get_water_data(timeout=30):
     """
     try:
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache'
+}
         response = requests.get(URL, headers=headers, timeout=timeout)
         response.raise_for_status()
         response.encoding = 'utf-8' # ระบุ encoding เป็น utf-8

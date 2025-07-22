@@ -146,8 +146,11 @@ def main():
             print("[INFO] diff น้อยกว่า threshold, ไม่แจ้ง")
             need_alert = False
 
-    # ... (ส่วนบนของไฟล์)
     if need_alert:
+        # กำหนดข้อความส่วนท้ายแยกออกมา
+        FOOTER_MESSAGE = "\n✨ สนับสนุนโดย ร้านจิปาถะอินทร์บุรี"
+
+        # สร้างข้อความทั้งหมด แล้วนำ FOOTER_MESSAGE มาต่อท้าย
         msg = (
             f"📢 แจ้งระดับน้ำ {direction}{abs(diff):.2f} ม. (อินทร์บุรี)\n"
             "════\n"
@@ -157,7 +160,7 @@ def main():
             f"📐 ห่างจากตลิ่ง : {data['below_bank']} ม.\n"
             "─────\n"
             f"🕒 เวลา        : {data['time']}"
-            FOOTER_MESSAGE = "✨ สนับสนุนโดย ร้านจิปาถะอินทร์บุรี" # <--- บรรทัดที่ผิด
+            f"{FOOTER_MESSAGE}"  # <-- แก้ไขโดยนำตัวแปรมาต่อท้ายแบบนี้
         )
         send_line_message(msg)
 # ... (ส่วนล่างของไฟล์)

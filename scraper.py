@@ -149,6 +149,7 @@ def main():
             f"{hist_str}\n"
             f"━━━━\n"
             f"🗓️ {now_th.strftime('%d/%m/%Y %H:%M น.')}"
+            FOOTER_MESSAGE = "✨ สนับสนุนโดย ร้านจิปาถะอินทร์บุรี" # <--- เพิ่มบรรทัดนี้
         )
         
         send_line_message(msg)

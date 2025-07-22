@@ -156,6 +156,7 @@ def main():
             f"📐 ห่างจากตลิ่ง : {data['below_bank']} ม.\n"
             "─────\n"
             f"🕒 เวลา        : {data['time']}"
+            FOOTER_MESSAGE = "✨ สนับสนุนโดย ร้านจิปาถะอินทร์บุรี" # <--- เพิ่มบรรทัดนี้
         )
         send_line_message(msg)
     else:

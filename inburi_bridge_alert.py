@@ -146,6 +146,7 @@ def main():
             print("[INFO] diff น้อยกว่า threshold, ไม่แจ้ง")
             need_alert = False
 
+    # ... (ส่วนบนของไฟล์)
     if need_alert:
         msg = (
             f"📢 แจ้งระดับน้ำ {direction}{abs(diff):.2f} ม. (อินทร์บุรี)\n"
@@ -156,9 +157,10 @@ def main():
             f"📐 ห่างจากตลิ่ง : {data['below_bank']} ม.\n"
             "─────\n"
             f"🕒 เวลา        : {data['time']}"
-            FOOTER_MESSAGE = "✨ สนับสนุนโดย ร้านจิปาถะอินทร์บุรี" # <--- เพิ่มบรรทัดนี้
+            FOOTER_MESSAGE = "✨ สนับสนุนโดย ร้านจิปาถะอินทร์บุรี" # <--- บรรทัดที่ผิด
         )
         send_line_message(msg)
+# ... (ส่วนล่างของไฟล์)
     else:
         print("[INFO] ไม่มีการแจ้งเตือนในรอบนี้")
 

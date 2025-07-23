@@ -98,11 +98,22 @@ def get_water_data():
             tr   = th.find_parent("tr")
             cols = tr.find_all("td")
             water_level = float(cols[1].get_text(strip=True))
-            bank_level  = float(cols[2].get_text(strip=True))
-            status      = tr.select_one("span.badge").get_text(strip=True)
-            below_bank  = round(bank_level - water_level, 2)
+
+            # 👇 ยึดระดับตลิ่งไว้ที่ 13.0 ม.
+            bank_level = 13.0
+
+            below_bank = round(bank_level - water_level, 2)
+
+            # 👇 สร้างสถานะใหม่ตามระยะห่างจากตลิ่ง
+            if below_bank < 0:
+                status = "ล้นตลิ่ง"
+            elif below_bank < 0.2:
+                status = "เสี่ยง"
+            else:
+                status = "ปกติ"
+
             report_time = cols[6].get_text(strip=True)
-            print(f"[DEBUG] Parsed water={water_level}, bank={bank_level}, status={status}, below={below_bank}, time={report_time}")
+            print(f"[DEBUG] Parsed water={{water_level}}, bank={{bank_level}}, status={{status}}, below={{below_bank}}, time={{report_time}}")
             return {
                 "station_name": "อินทร์บุรี",
                 "water_level":   water_level,

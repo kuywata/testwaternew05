@@ -47,3 +47,5 @@ jobs:
           author_email: "github-actions[bot]@users.noreply.github.com"
           message: "chore: update inburi_bridge_data.json"
           add: "inburi_bridge_data.json"
+          # 👇 [แก้ไข] เพิ่มบรรทัดนี้เพื่อป้องกันข้อผิดพลาด non-fast-forward
+          pull: '--rebase --autostash'

@@ -1,8 +1,8 @@
 {
   "station_name": "อินทร์บุรี",
-  "water_level": 13.02,
+  "water_level": 13.0,
   "bank_level": 13.0,
-  "status": "ล้นตลิ่ง",
-  "below_bank": -0.02,
-  "time": "20:00 น."
+  "status": "เสี่ยง",
+  "below_bank": 0.0,
+  "time": "20:20 น."
 }
